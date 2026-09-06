@@ -1,5 +1,5 @@
 // Development-only fixture adapter. Vite removes this module from release builds.
-import type { Bootstrap, IUsageAppApi, Page, ProviderDefinition, ProviderReport, Unsubscribe, UsageMeter } from "./types";
+import type { AccountRouting, Bootstrap, IUsageAppApi, Page, ProviderDefinition, ProviderReport, RouterSettings, Unsubscribe, UsageMeter } from "./types";
 
 const providers: ProviderDefinition[] = [
   { id: "openai", name: "OpenAI", category: "llm", initials: "OA", color: "#87e4b0", description: "Codex allowances included with your ChatGPT subscription.", helpUrl: "https://chatgpt.com/codex/settings/usage", fields: [{ key: "connection", label: "Connection", kind: "select", help: "Use a separate website session or the existing Codex sign-in.", placeholder: "", options: [{ value: "browser", label: "Sign in to ChatGPT" }, { value: "codex", label: "Use signed-in Codex" }] }] },
@@ -28,7 +28,7 @@ function fixture(): Bootstrap {
       [sample("5-hour allowance", 75, 3), sample("Weekly allowance", 50, 62), sample("Monthly allowance", 40, 182)],
     ][index] ?? [] },
   }));
-  return { providers, settings: { version: 1, refreshMinutes: 5, providers: empty ? {} : Object.fromEntries(providers.map(provider => [provider.id, { enabled: true, fields: {}, sessionGeneration: 0, revision: 0 }])) }, reports: empty ? [] : reports, startupError: null, configuredSecrets: {} };
+  return { providers, settings: { version: 2, refreshMinutes: 5, routing: { enabled: false, port: 43129, accountOrder: [], fallbacks: [] }, providers: empty ? {} : Object.fromEntries(providers.map(provider => [provider.id, { providerType: "", label: "", routing: { enabled: false, models: [] }, enabled: true, fields: {}, sessionGeneration: 0, revision: 0 }])) }, reports: empty ? [] : reports, startupError: null, configuredSecrets: {}, inference: { openrouter: { description: "Free models only." } }, router: { running: false, baseUrl: "http://127.0.0.1:43129/v1", tokenConfigured: false, error: null } };
 }
 export class PreviewApi implements IUsageAppApi {
   private data = fixture();
@@ -38,7 +38,10 @@ export class PreviewApi implements IUsageAppApi {
   async bootstrap(): Promise<Bootstrap> { return structuredClone(this.data); }
   async currentPage(): Promise<Page> { return location.hash === "#settings" ? "settings" : "usage"; }
   async refresh(): Promise<void> { this.usage?.(structuredClone(this.data.reports)); }
-  async saveProvider(id: string, enabled: boolean, fields: Record<string, string>, secrets: Record<string, string>): Promise<void> { if (Object.values(secrets).some(Boolean)) throw new Error("Key storage is available in the desktop app. This is a browser preview."); this.data.settings.providers[id] = { enabled, fields, sessionGeneration: 0, revision: 0 }; this.changed?.(); }
+  async saveProvider(id: string, enabled: boolean, label: string, fields: Record<string, string>, secrets: Record<string, string>, routing: AccountRouting): Promise<void> { if (Object.values(secrets).some(Boolean)) throw new Error("Key storage is available in the desktop app. This is a browser preview."); this.data.settings.providers[id] = { providerType: this.data.settings.providers[id]?.providerType ?? "", label, routing, enabled, fields, sessionGeneration: 0, revision: 0 }; this.changed?.(); }
+  async addAccount(providerType: string): Promise<string> { const id = `account-${crypto.randomUUID()}`; this.data.settings.providers[id] = { providerType, label: "Example account", routing: { enabled: false, models: [] }, enabled: false, fields: {}, sessionGeneration: 0, revision: 0 }; return id; }
+  async saveRouting(routing: RouterSettings, clientToken: string): Promise<void> { if (clientToken) throw new Error("Client keys are only saved in the desktop app."); this.data.settings.routing = routing; }
+  async discoverModels(): Promise<string[]> { return ["example/local-model"]; }
   async connect(): Promise<string> { throw new Error("Sign-in is available in the desktop app. This is a browser preview."); }
   async forget(id: string): Promise<void> { delete this.data.settings.providers[id]; this.data.reports = this.data.reports.filter(report => report.providerId !== id); this.changed?.(); }
   async savePreferences(refreshMinutes: number): Promise<void> { this.data.settings.refreshMinutes = refreshMinutes; }

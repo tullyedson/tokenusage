@@ -2,6 +2,10 @@
 
 A Rust and Tauri 2 app for Windows that keeps your AI subscription allowances in the system tray. The local HTML interface shows each provider's actual usage windows, remaining balances, percentages and reset times.
 
+Version 0.3 adds multiple accounts per provider and an authenticated local model router with account priority, model aliases, explicit fallback mappings, and streaming chat completions. Routing supports local Ollama, local/LAN vLLM, and OpenRouter's verified free models. Consumer subscription connections remain usage-only where a supported query path cannot enforce included-only spending. Paid fallback is disabled.
+
+See the [routing setup and API guide](docs/ROUTING.html) for supported connections, requirements, examples, and extension contracts. Configure each account's models in **Settings**, then set priority and substitutions on the **Routing** page. Enable the router and copy its base URL and newly generated client key into the calling app. The default base URL is `http://127.0.0.1:43129/v1`.
+
 ## Install and use
 
 Run the AI Usage NSIS installer, or build it using the instructions below. Generated installers are kept outside source control. The installer installs for the current Windows user and offers to install Microsoft Edge WebView2 if it is missing.
@@ -10,6 +14,8 @@ Run the AI Usage NSIS installer, or build it using the instructions below. Gener
 2. For website connections, choose **Connect account** and sign in directly on the provider's website, including any multifactor authentication. Close that window after sign-in to refresh usage. For key connections, paste the key into the provider's password field and choose **Connect account**.
 3. For OpenAI, you can instead select **Use signed-in Codex** to read the account already connected to the installed Codex app or CLI. Leave the executable path empty for automatic discovery.
 4. A check appears after the first successful reading. Each enabled provider appears on the Usage page. Unavailable readings show an error, with the last successful reading retained for the current app session.
+
+Use **Add another account** inside a provider to create another isolated connection. Account labels distinguish them on Usage and in routing priority. Existing connections migrate without changing saved key targets or browser profiles. Multiple **Use signed-in Codex** connections follow the same installed Codex login; choose website connections for independent OpenAI usage accounts.
 
 Click or double-click the tray icon to show Usage. Its right-click menu contains **Show usage**, **Settings** and **Exit**. Closing the main window hides it in the tray. **Exit** stops it. **Start with Windows** is optional and starts the app with its window hidden. Automatic refresh defaults to five minutes and is configurable from one to sixty minutes.
 
@@ -26,6 +32,8 @@ Settings categories are **LLM**, **Music**, **Speech** and **Media**. Speech is 
 | OpenCode | LLM | Go subscription five-hour, weekly and monthly percentages and reset times, using an API key from the subscribed workspace |
 | Suno | Music | Monthly subscription credits and total remaining credits, including top-ups |
 | Higgsfield | Media | Subscription allowance, total wallet and any auto-refill credit balance for the current workspace |
+| Ollama (local) | LLM | Local server connectivity and eligible model discovery, without inventing a subscription percentage |
+| vLLM (local) | LLM | Local or LAN server connectivity and model discovery, without a subscription quota |
 
 OpenAI's source reports **Codex usage**. It does not expose all ChatGPT chat-model caps. Consumer subscription allowances are separate from API billing. No model generation, paid API calls or usage-reset purchases are part of these readers.
 

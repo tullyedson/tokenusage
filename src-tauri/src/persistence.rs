@@ -6,11 +6,27 @@ pub fn load(path: &Path) -> Result<Settings, String> {
         return Ok(Settings::default());
     }
     let data = fs::read(path).map_err(|_| "Could not read saved settings.")?;
-    let settings: Settings = serde_json::from_slice(&data)
+    let mut settings: Settings = serde_json::from_slice(&data)
         .map_err(|_| "Saved settings are damaged. The original file was preserved.")?;
-    if settings.version != 1 {
+    if !matches!(settings.version, 1 | 2) {
         return Err("These settings were saved by a different app version. The original file was preserved.".into());
     }
+    // Keep legacy account IDs intact: vault targets and browser profiles use them.
+    settings.version = 2;
+    if settings.providers.len() > 64
+        || settings.providers.iter().any(|(id, config)| {
+            !crate::routing::config::valid_account(id)
+                || (!config.provider_type.is_empty()
+                    && !crate::routing::config::valid_account(&config.provider_type))
+                || crate::routing::config::validate_account(&config.routing).is_err()
+        })
+    {
+        return Err("Saved accounts are invalid. The original file was preserved.".into());
+    }
+    crate::routing::config::validate(
+        &settings.routing,
+        &settings.providers.keys().cloned().collect(),
+    )?;
     if !(1..=60).contains(&settings.refresh_minutes) {
         return Err("Saved refresh interval is invalid. The original file was preserved.".into());
     }
@@ -59,6 +75,22 @@ fn replace(from: &Path, to: &Path) -> Result<(), ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn version_one_migrates_without_renaming_accounts_or_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let original = br#"{"version":1,"refreshMinutes":5,"providers":{"openrouter":{"enabled":true,"fields":{"connection":"key"},"sessionGeneration":7,"revision":2}}}"#;
+        fs::write(&path, original).unwrap();
+        let settings = load(&path).unwrap();
+        assert_eq!(settings.version, 2);
+        assert!(!settings.routing.enabled);
+        let account = &settings.providers["openrouter"];
+        assert_eq!(account.provider_type("openrouter"), "openrouter");
+        assert_eq!(account.session_generation, 7);
+        assert_eq!(account.revision, 2);
+        assert!(!account.routing.enabled);
+        assert_eq!(fs::read(&path).unwrap(), original);
+    }
     #[test]
     fn settings_survive_replacement_and_bad_data_is_preserved() {
         let dir = tempfile::tempdir().unwrap();

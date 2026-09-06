@@ -8,7 +8,7 @@ pub struct OpenAi;
 #[async_trait]
 impl IUsageProvider for OpenAi {
     fn definition(&self) -> ProviderDefinition {
-        let mut connection = SettingField::text("connection", "Connection", "Codex reads your existing signed-in Codex installation. Website sign-in keeps a separate ChatGPT session in this app.");
+        let mut connection = SettingField::text("connection", "Connection", "Codex follows the account currently signed in to your Codex installation. For independent accounts, use separate website connections in this app.");
         connection.kind = "select";
         connection.options = vec![
             FieldOption {
@@ -40,7 +40,7 @@ impl IUsageProvider for OpenAi {
             context
                 .browser
                 .sign_in(
-                    "openai",
+                    &context.account_id,
                     self.browser_spec().ok_or("Missing browser connection.")?,
                     config,
                 )
@@ -59,7 +59,7 @@ impl IUsageProvider for OpenAi {
             context
                 .browser
                 .read(
-                    "openai",
+                    &context.account_id,
                     self.browser_spec().ok_or("Missing browser connection.")?,
                     config,
                     &context.cancelled,

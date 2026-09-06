@@ -24,7 +24,7 @@ impl IUsageProvider for OpenCode {
     ) -> Result<UsageSnapshot, String> {
         let key = context
             .secrets
-            .get("opencode", "api_key")?
+            .get(&context.account_id, "api_key")?
             .ok_or("Save your OpenCode API key in Settings, then connect.")?;
         let value = http::get_usage("https://opencode.ai/zen/go/v1/usage", &key, &context.cancelled, "This key needs an OpenCode Go subscription in its workspace. Zen pay-as-you-go credits are separate from Go allowances.").await?;
         self.parse(value, config)

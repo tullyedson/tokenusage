@@ -2,6 +2,7 @@
 //! The UI builds settings and usage cards entirely from this public contract.
 mod anthropic;
 mod higgsfield;
+mod local;
 mod ollama;
 mod openai;
 mod opencode;
@@ -18,6 +19,7 @@ use serde_json::Value;
 use std::sync::{atomic::AtomicBool, Arc};
 
 pub struct FetchContext {
+    pub account_id: String,
     pub browser: BrowserSession,
     pub cancelled: Arc<AtomicBool>,
     pub secrets: Arc<dyn ISecretStore>,
@@ -38,6 +40,9 @@ pub struct BrowserSpec {
 #[async_trait]
 pub trait IUsageProvider: Send + Sync {
     fn definition(&self) -> ProviderDefinition;
+    fn inference(&self) -> Option<Arc<dyn crate::routing::engine::IInferenceProvider>> {
+        None
+    }
     fn browser_spec(&self) -> Option<BrowserSpec> {
         None
     }
@@ -50,7 +55,7 @@ pub trait IUsageProvider: Send + Sync {
         context
             .browser
             .sign_in(
-                self.definition().id,
+                &context.account_id,
                 self.browser_spec()
                     .ok_or("This provider needs an API key connection.")?,
                 config,
@@ -66,7 +71,7 @@ pub trait IUsageProvider: Send + Sync {
         let value = context
             .browser
             .read(
-                self.definition().id,
+                &context.account_id,
                 self.browser_spec()
                     .ok_or("This provider needs an API key connection.")?,
                 config,
@@ -86,5 +91,11 @@ pub fn registry() -> Vec<Arc<dyn IUsageProvider>> {
         Arc::new(opencode::OpenCode),
         Arc::new(suno::Suno),
         Arc::new(higgsfield::Higgsfield),
+        Arc::new(local::LocalModels(
+            crate::routing::providers::HttpProvider::OllamaLocal,
+        )),
+        Arc::new(local::LocalModels(
+            crate::routing::providers::HttpProvider::VllmLocal,
+        )),
     ]
 }

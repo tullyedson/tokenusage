@@ -11,6 +11,8 @@ The extension boundary is `IUsageProvider` in `src-tauri/src/providers/mod.rs`. 
 
 That is enough to make the provider appear in both Settings and Usage. Choose an existing category: `llm`, `music`, `speech` or `media`. IDs must be unique, stable lowercase letters, digits or hyphens because they are also used as session-profile identifiers.
 
+The ID `router` is reserved for local client authentication. Do not use it as a provider ID.
+
 ## Contract
 
 | Method | Responsibility |
@@ -23,9 +25,19 @@ That is enough to make the provider appear in both Settings and Usage. Choose an
 
 `ProviderDefinition.fields` supports `text`, `number`, `select` and `secret`. Text, number and select values are **nonsecret configuration only**, such as workspace IDs, executable paths and reference allowances. Declare a key with `SettingField::secret("api_key", "API key", "Help text")`. The generic frontend renders a blank password input and sends its value in a separate `secrets` argument to `save_provider`. Native validation rejects secret fields in the ordinary fields map, and only nonsecret fields enter `ProviderConfig` or settings JSON.
 
-The service saves secret values through the method-only `ISecretStore` boundary, currently backed by Windows Credential Manager. `Bootstrap.configuredSecrets` contains field names whose keys are saved, never values. Blank secrets mean preserve the saved value. Credential changes are rolled back if the atomic settings save fails. Forget deletes the provider's secret fields. Do not read the vault directly from a provider or expose a command to retrieve keys into HTML; use `context.secrets.get(provider_id, field)` in native Rust. Retrieved strings use `Zeroizing` buffers.
+The service saves secret values through the method-only `ISecretStore` boundary, currently backed by Windows Credential Manager. `Bootstrap.configuredSecrets` contains field names whose keys are saved, never values. Blank secrets mean preserve the saved value. Credential changes are rolled back if the atomic settings save fails. Forget deletes the account's secret fields. Do not read the vault directly from a provider or expose a command to retrieve keys into HTML; use `context.secrets.get(&context.account_id, field)` in native Rust. Retrieved strings use `Zeroizing` buffers. Never substitute the provider type ID for the account ID: multiple accounts share one adapter but must not share credentials or browser profiles.
 
-`FetchContext` provides the browser session, cancellation flag and an `ISecretStore`. Interfaces use methods; DTOs carry data. Provider internals stay out of the UI, service scheduler and persistence layer.
+`FetchContext` provides the account ID, browser session, cancellation flag and an `ISecretStore`. Interfaces use methods; DTOs carry data. Provider internals stay out of the UI, service scheduler and persistence layer. New accounts have stable opaque IDs; legacy account IDs retain the provider ID so upgrades preserve saved connections. `ProviderConfig.provider_type(account_id)` resolves the adapter type without renaming the account.
+
+## Optional inference support
+
+Implement `IUsageProvider::inference()` to return an `IInferenceProvider` from `routing/engine.rs`. That interface provides metadata, configuration validation, model discovery, and preflight request preparation. Metadata automatically enables generic model-mapping controls in Settings. The engine and service contain no provider-ID branches. See [Routing architecture and contract](ROUTING.html) for the full lifecycle.
+
+Inference is separate from usage monitoring. A query adapter must enforce local/free/included-only spending before it is registered. Never use subscription meters as authorization for an unrelated paid API key. Check every applicable quota window for the requested upstream model; return `Unavailable` with a provider reset/retry time and account/model scope. An expired reset permits another check, not an invented fresh allowance. If enforcement or allowance status cannot be established, fail closed. The HTTP adapters demonstrate verified model catalogs, loopback/private server validation and a provider-side zero-price guard.
+
+The common transport speaks OpenAI-compatible chat completions, with bounded JSON and SSE forwarding. A provider using a different response protocol needs a tested conversion at the inference boundary. Do not pass native Responses/Messages output through as chat completions. Native agent runtimes are not generic chat HTTP endpoints.
+
+Test through `IInferenceProvider` with fictional local HTTP fixtures. Cover model aliases, account priority, multiple accounts, quota exhaustion, reset recovery, cancellation, paid-request rejection, and interrupted responses without replay. Never construct the Tauri usage registry in these tests.
 
 The OpenRouter and OpenCode adapters demonstrate native-key connections. Return `Ready` from `connect`, load the key in `fetch`, and call `http::get_usage` with a verified constant HTTPS endpoint and the cancellation flag. This transport permits GET only, rejects redirects, uses bounded waits and response sizes, and returns redacted errors. Parse only quota fields into a `UsageSnapshot`. Avoid logging raw responses, keys or account identity. Use a helpful static 403 message when the source requires a specific key type or subscription.
 

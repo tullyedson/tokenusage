@@ -60,6 +60,12 @@ impl SettingField {
 #[derive(Clone, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderConfig {
+    #[serde(default)]
+    pub provider_type: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub routing: crate::routing::config::AccountRouting,
     pub enabled: bool,
     #[serde(default)]
     pub fields: BTreeMap<String, String>,
@@ -70,6 +76,13 @@ pub struct ProviderConfig {
 }
 
 impl ProviderConfig {
+    pub fn provider_type<'a>(&'a self, account_id: &'a str) -> &'a str {
+        if self.provider_type.is_empty() {
+            account_id
+        } else {
+            &self.provider_type
+        }
+    }
     pub fn field(&self, key: &str) -> &str {
         self.fields.get(key).map(String::as_str).unwrap_or("")
     }
@@ -87,14 +100,17 @@ pub struct Settings {
     pub version: u32,
     pub refresh_minutes: u64,
     pub providers: BTreeMap<String, ProviderConfig>,
+    #[serde(default)]
+    pub routing: crate::routing::config::RouterSettings,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: 2,
             refresh_minutes: 5,
             providers: BTreeMap::new(),
+            routing: Default::default(),
         }
     }
 }

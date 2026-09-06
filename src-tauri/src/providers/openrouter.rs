@@ -7,6 +7,11 @@ use crate::{
 pub struct OpenRouter;
 #[async_trait]
 impl IUsageProvider for OpenRouter {
+    fn inference(&self) -> Option<Arc<dyn crate::routing::engine::IInferenceProvider>> {
+        Some(Arc::new(
+            crate::routing::providers::HttpProvider::OpenRouterFree,
+        ))
+    }
     fn definition(&self) -> ProviderDefinition {
         let mut connection = SettingField::text("connection", "Usage source", "Account credits require an OpenRouter management key. A standard key reports only its own spending allowance.");
         connection.kind = "select";
@@ -36,7 +41,7 @@ impl IUsageProvider for OpenRouter {
     ) -> Result<UsageSnapshot, String> {
         let key = context
             .secrets
-            .get("openrouter", "api_key")?
+            .get(&context.account_id, "api_key")?
             .ok_or("Save an OpenRouter key in Settings, then connect.")?;
         let url = if config.field("connection") == "key" {
             "https://openrouter.ai/api/v1/key"

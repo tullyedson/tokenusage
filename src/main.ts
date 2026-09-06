@@ -2,8 +2,10 @@ import { isTauri } from "@tauri-apps/api/core";
 import { NativeApi } from "./api";
 import { balance, escapeHtml as esc, meterTone, percent, resetLabel, updatedLabel } from "./format";
 import { clearSecretInputs, readFields, renderField } from "./settings-form";
+import { accountRouting, bindModelRows, bindRoutingRows, modelRow, readAccountRouting, readRouting, routingPage } from "./routing-form";
 import type { Bootstrap, Category, IUsageAppApi, Page, ProviderDefinition, ProviderReport, SettingField, Unsubscribe, UsageMeter } from "./types";
 import "./style.css";
+import "./routing.css";
 
 const root = document.querySelector<HTMLDivElement>("#app");
 if (!root) throw new Error("App root missing");
@@ -24,7 +26,13 @@ const subscriptions: Unsubscribe[] = [];
 
 function logo(): string { return '<span class="logo" aria-hidden="true"><i></i><i></i><i></i></span>'; }
 function icon(provider: ProviderDefinition): string { return `<span class="provider-icon" style="--provider:${esc(provider.color)}">${esc(provider.initials)}</span>`; }
-function configuredProviders(): ProviderDefinition[] { return data.providers.filter(provider => data.settings.providers[provider.id]?.enabled); }
+type AccountView = ProviderDefinition & { providerType: string };
+function accountsFor(provider: ProviderDefinition): AccountView[] {
+  const ids = Object.keys(data.settings.providers).filter(id => (data.settings.providers[id]?.providerType || id) === provider.id);
+  if (!ids.length) ids.push(provider.id);
+  return ids.map(id => ({ ...provider, id, providerType: provider.id, name: data.settings.providers[id]?.label ? `${provider.name} · ${data.settings.providers[id]?.label}` : provider.name }));
+}
+function configuredProviders(): AccountView[] { return data.providers.flatMap(accountsFor).filter(provider => data.settings.providers[provider.id]?.enabled); }
 function reportFor(id: string): ProviderReport | undefined { return data.reports.find(report => report.providerId === id); }
 function notify(message: string, error = false): void {
   const toast = appRoot.querySelector<HTMLDivElement>("#toast");
@@ -38,14 +46,14 @@ function errorMessage(error: unknown): string { return error instanceof Error ? 
 function renderShell(): void {
   appRoot.innerHTML = `${preview ? '<div class="preview-banner">Browser preview · Sample readings, no accounts connected</div>' : ""}
     <header class="app-header"><a class="brand" href="#usage">${logo()}<span>AI Usage</span></a>
-      <nav aria-label="Main"><button type="button" data-page="usage">Usage</button><button type="button" data-page="settings">Settings</button></nav>
+      <nav aria-label="Main"><button type="button" data-page="usage">Usage</button><button type="button" data-page="routing">Routing</button><button type="button" data-page="settings">Settings</button></nav>
       <span class="tray-note"><span class="live-dot"></span>In your tray</span>
     </header>
     <main id="content"></main>
-    <footer><span>Private to this Windows account</span><span>AI Usage <span class="version">0.2.0</span></span></footer>
+    <footer><span>Private to this Windows account</span><span>AI Usage <span class="version">0.3.1</span></span></footer>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <dialog id="forget-dialog"><form method="dialog"><span class="eyebrow">DISCONNECT PROVIDER</span><h2>Forget this connection?</h2><p>This clears this app’s saved key, website session and settings for the provider. Your subscription stays active.</p><div class="form-actions"><button value="cancel" class="secondary">Cancel</button><button value="forget" class="danger">Forget connection</button></div></form></dialog>`;
-  appRoot.querySelectorAll<HTMLButtonElement>("[data-page]").forEach(button => button.addEventListener("click", () => navigate(button.dataset.page === "settings" ? "settings" : "usage")));
+  appRoot.querySelectorAll<HTMLButtonElement>("[data-page]").forEach(button => button.addEventListener("click", () => navigate(button.dataset.page === "settings" ? "settings" : button.dataset.page === "routing" ? "routing" : "usage")));
   appRoot.querySelector(".brand")?.addEventListener("click", event => { event.preventDefault(); navigate("usage"); });
   renderPage();
 }
@@ -59,6 +67,7 @@ function renderPage(): void {
   const content = appRoot.querySelector<HTMLElement>("#content");
   if (!content) return;
   if (page === "settings") { content.innerHTML = settingsPage(); bindSettings(); }
+  else if (page === "routing") { content.innerHTML = routingPage(data); bindRouting(); }
   else { content.innerHTML = usagePage(); bindUsage(); }
 }
 
@@ -97,23 +106,30 @@ function bindUsage(): void {
   appRoot.querySelectorAll<HTMLButtonElement>("[data-configure]").forEach(button => button.addEventListener("click", () => {
     navigate("settings");
     const detail = appRoot.querySelector<HTMLDetailsElement>(`details[data-provider="${CSS.escape(button.dataset.configure ?? "")}"]`);
-    if (detail) { detail.open = true; const category = detail.closest<HTMLDetailsElement>(".category"); if (category) category.open = true; detail.scrollIntoView({ block: "nearest" }); }
+    if (detail) { detail.open = true; const group = detail.closest<HTMLDetailsElement>(".provider-group"); if (group) group.open = true; const category = detail.closest<HTMLDetailsElement>(".category"); if (category) category.open = true; detail.scrollIntoView({ block: "nearest" }); }
   }));
 }
 
 function fieldHtml(provider: ProviderDefinition, field: SettingField): string {
   return renderField(provider.id, field, data.settings.providers[provider.id]?.fields[field.key] ?? "", data.configuredSecrets[provider.id]?.includes(field.key) ?? false);
 }
-function providerSettings(provider: ProviderDefinition): string {
+function accountSettings(provider: AccountView): string {
   const config = data.settings.providers[provider.id];
   const connected = Boolean(config?.enabled && reportFor(provider.id)?.snapshot);
   return `<details class="provider-settings" data-provider="${esc(provider.id)}"><summary>${icon(provider)}<span class="provider-summary">${esc(provider.name)}</span><span class="setup-state ${connected ? "is-setup" : ""}">${connected ? "✓ Connected" : config?.enabled ? "Enabled" : "Not set up"}</span><span class="chevron">›</span></summary>
     <form data-provider-form="${esc(provider.id)}"><p class="provider-description">${esc(provider.description)}</p>
-      <label class="toggle-row"><span>Track this provider</span><input type="checkbox" name="enabled" ${config?.enabled ? "checked" : ""} /><span class="toggle" aria-hidden="true"></span></label>
+      <label class="account-label">Account label<input name="accountLabel" value="${esc(config?.label ?? "")}" maxlength="100" placeholder="Personal, work, local server..."></label>
+      <label class="toggle-row"><span>Enable this account</span><input type="checkbox" name="enabled" ${config?.enabled ? "checked" : ""} /><span class="toggle" aria-hidden="true"></span></label>
       <div class="fields">${provider.fields.map(field => fieldHtml(provider, field)).join("")}</div>
+      ${accountRouting(config?.routing, data.inference[provider.providerType]?.description)}
       <p class="session-note"><span aria-hidden="true">▣</span> ${provider.fields.some(field => field.kind === "secret") ? "Enter your provider key above, then connect. A blank key field keeps the saved key." : "Sign in directly with the provider. This app keeps a separate website session on this PC."}</p>
       <div class="form-actions"><button type="submit" class="primary">Save settings</button><button type="button" class="secondary" data-connect="${esc(provider.id)}">Connect account ↗</button><button type="button" class="text-button forget" data-forget="${esc(provider.id)}" ${config ? "" : "disabled"}>Forget</button></div>
     </form></details>`;
+}
+function providerSettings(provider: ProviderDefinition): string {
+  const accounts = accountsFor(provider);
+  const connected = accounts.some(account => data.settings.providers[account.id]?.enabled && reportFor(account.id)?.snapshot);
+  return `<details class="provider-group" data-provider-type="${esc(provider.id)}"><summary>${icon(provider)}<span class="provider-summary">${esc(provider.name)}</span><span class="group-setup setup-state ${connected ? "is-setup" : ""}">${connected ? "✓ Set up" : "Not set up"}</span><span class="chevron">›</span></summary><div class="provider-accounts">${accounts.map(accountSettings).join("")}<button type="button" class="secondary" data-add-account="${esc(provider.id)}">Add another account</button></div></details>`;
 }
 function settingsPage(): string {
   return `<section class="page-heading"><div><span class="eyebrow">MAKE YOURSELF AT HOME</span><h1>Settings</h1><p>Connect an account. Its usage takes care of itself.</p></div></section>
@@ -122,13 +138,14 @@ function settingsPage(): string {
     <div class="section-label"><span>PROVIDERS</span><span>Expand a category to connect</span></div>
     <section class="categories">${categories.map(category => {
       const providers = data.providers.filter(provider => provider.category === category.id);
-      const enabled = providers.filter(provider => data.settings.providers[provider.id]?.enabled).length;
+      const enabled = providers.flatMap(accountsFor).filter(provider => data.settings.providers[provider.id]?.enabled).length;
       return `<details class="category"><summary><span class="category-icon">${category.icon}</span><span class="category-name"><strong>${category.title}</strong><small>${category.description}</small></span><span class="category-count">${enabled ? `${enabled} enabled · ` : ""}${providers.length} provider${providers.length === 1 ? "" : "s"}</span><span class="chevron">›</span></summary><div class="category-body">${providers.length ? providers.map(providerSettings).join("") : '<p class="category-empty">No speech providers added yet.</p>'}</div></details>`;
     }).join("")}</section><p class="privacy-note">Keys are saved in Windows Credential Manager. Website sessions stay in this app’s private browser profiles. Usage readers only request balances and allowances.</p>`;
 }
 async function saveForm(form: HTMLFormElement, id: string, enabled: boolean): Promise<void> {
   const { fields, secrets } = readFields(form);
-  try { await api.saveProvider(id, enabled, fields, secrets); clearSecretInputs(form); }
+  const label = form.querySelector<HTMLInputElement>('[name="accountLabel"]')?.value.trim() ?? "";
+  try { await api.saveProvider(id, enabled, label, fields, secrets, readAccountRouting(form)); clearSecretInputs(form); }
   finally { for (const key of Object.keys(secrets)) delete secrets[key]; }
   await reloadData(); updateSetupStatus();
 }
@@ -140,6 +157,14 @@ async function withForm(form: HTMLFormElement, action: () => Promise<void>): Pro
 }
 async function reloadData(): Promise<void> { data = await api.bootstrap(); }
 function bindSettings(): void {
+  appRoot.querySelectorAll<HTMLButtonElement>("[data-add-account]").forEach(button => button.addEventListener("click", () => {
+    button.disabled = true;
+    void api.addAccount(button.dataset.addAccount ?? "").then(async id => {
+      await reloadData(); renderPage();
+      const detail = appRoot.querySelector<HTMLDetailsElement>(`[data-provider="${CSS.escape(id)}"]`);
+      if (detail) { detail.open = true; const group = detail.closest<HTMLDetailsElement>(".provider-group"); if (group) group.open = true; const category = detail.closest<HTMLDetailsElement>(".category"); if (category) category.open = true; detail.scrollIntoView({ block: "nearest" }); }
+    }).catch(error => notify(errorMessage(error), true)).finally(() => { button.disabled = false; });
+  }));
   const checkbox = appRoot.querySelector<HTMLInputElement>("#autostart");
   if (checkbox) {
     void api.getAutostart().then(enabled => { if (checkbox.isConnected) { checkbox.checked = enabled; checkbox.disabled = false; } }).catch(error => notify(errorMessage(error), true));
@@ -154,6 +179,23 @@ function bindSettings(): void {
   });
   appRoot.querySelectorAll<HTMLFormElement>("[data-provider-form]").forEach(form => {
     const id = form.dataset.providerForm ?? "";
+    bindModelRows(form);
+    form.querySelector("[data-list-models]")?.addEventListener("click", () => {
+      if (!form.reportValidity()) return;
+      void withForm(form, async () => {
+        const models = await api.discoverModels(id);
+        const catalog = form.querySelector<HTMLElement>("[data-model-catalog]");
+        if (!catalog) return;
+        catalog.replaceChildren();
+        if (!models.length) { catalog.textContent = "No eligible models found. Check your server or provider model catalog."; return; }
+        const label = document.createElement("p"); label.textContent = "Choose a model to add its ID. You can then give it a shared client name."; catalog.append(label);
+        const select = document.createElement("select"); select.setAttribute("aria-label", "Available server models");
+        for (const model of models) { const option = document.createElement("option"); option.value = model; option.textContent = model; select.append(option); }
+        const add = document.createElement("button"); add.type = "button"; add.className = "secondary"; add.textContent = "Add selected model";
+        add.addEventListener("click", () => { form.querySelector("[data-model-rows]")?.insertAdjacentHTML("beforeend", modelRow({ model: select.value, upstream: select.value })); });
+        catalog.append(select, add);
+      });
+    });
     form.addEventListener("submit", event => {
       event.preventDefault();
       void withForm(form, async () => { await saveForm(form, id, form.querySelector<HTMLInputElement>('[name="enabled"]')?.checked ?? false); notify("Provider settings saved."); if (data.settings.providers[id]?.enabled) void refresh(id); });
@@ -174,6 +216,11 @@ function bindSettings(): void {
   });
 }
 function updateSetupStatus(): void {
+  appRoot.querySelectorAll<HTMLDetailsElement>(".provider-group").forEach(group => {
+    const provider = data.providers.find(p => p.id === group.dataset.providerType); if (!provider) return;
+    const connected = accountsFor(provider).some(account => data.settings.providers[account.id]?.enabled && reportFor(account.id)?.snapshot);
+    const state = group.querySelector(".group-setup"); if (state) { state.textContent = connected ? "✓ Set up" : "Not set up"; state.classList.toggle("is-setup", connected); }
+  });
   appRoot.querySelectorAll<HTMLDetailsElement>(".provider-settings").forEach(detail => {
     const id = detail.dataset.provider ?? "";
     detail.querySelectorAll<HTMLInputElement>("input[data-secret]").forEach(input => {
@@ -184,6 +231,25 @@ function updateSetupStatus(): void {
     const connected = Boolean(data.settings.providers[id]?.enabled && reportFor(id)?.snapshot);
     status.textContent = connected ? "✓ Connected" : data.settings.providers[id]?.enabled ? "Enabled" : "Not set up";
     status.classList.toggle("is-setup", connected);
+  });
+}
+function bindRouting(): void {
+  const form = appRoot.querySelector<HTMLFormElement>("#routing-form"); if (!form) return;
+  bindRoutingRows(form);
+  const key = form.querySelector<HTMLInputElement>("#client-token");
+  form.querySelector("[data-generate-token]")?.addEventListener("click", () => {
+    if (key) { const random = crypto.getRandomValues(new Uint8Array(32)); key.value = [...random].map(value => value.toString(16).padStart(2, "0")).join(""); notify("New key generated. Copy it to your calling app, then save routing settings."); }
+  });
+  form.querySelector("[data-copy-token]")?.addEventListener("click", () => {
+    if (!key?.value) { notify("Generate a new key first. Saved keys cannot be retrieved.", true); return; }
+    void navigator.clipboard.writeText(key.value).then(() => notify("New client key copied.")).catch(() => { key.type = "text"; key.select(); notify("Select and copy this new key, then save routing settings."); });
+  });
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    void withForm(form, async () => {
+      await api.saveRouting(readRouting(form), key?.value ?? ""); if (key) key.value = "";
+      await reloadData(); renderPage(); notify(data.router.error ?? "Routing settings saved.", Boolean(data.router.error));
+    });
   });
 }
 async function refresh(id?: string): Promise<void> {

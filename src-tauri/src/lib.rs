@@ -6,6 +6,7 @@ pub mod model;
 mod persistence;
 mod provider_settings;
 pub mod providers;
+pub mod routing;
 mod service;
 
 use service::{Bootstrap, UsageService};
@@ -61,12 +62,36 @@ async fn save_provider(
     service: State<'_, Arc<UsageService>>,
     provider_id: String,
     enabled: bool,
+    label: String,
     fields: BTreeMap<String, String>,
     secrets: BTreeMap<String, String>,
+    routing: routing::config::AccountRouting,
 ) -> Result<(), String> {
     service
-        .save_provider(&provider_id, enabled, fields, secrets)
+        .save_provider(&provider_id, enabled, label, fields, secrets, routing)
         .await
+}
+#[tauri::command]
+async fn add_account(
+    service: State<'_, Arc<UsageService>>,
+    provider_type: String,
+) -> Result<String, String> {
+    service.add_account(&provider_type).await
+}
+#[tauri::command]
+async fn save_routing(
+    service: State<'_, Arc<UsageService>>,
+    routing: routing::config::RouterSettings,
+    client_token: String,
+) -> Result<(), String> {
+    service.save_routing(routing, client_token).await
+}
+#[tauri::command]
+async fn discover_models(
+    service: State<'_, Arc<UsageService>>,
+    provider_id: String,
+) -> Result<Vec<String>, String> {
+    service.discover_models(&provider_id).await
 }
 #[tauri::command]
 async fn sign_in(
@@ -122,6 +147,9 @@ pub fn run() {
             current_page,
             refresh_usage,
             save_provider,
+            add_account,
+            save_routing,
+            discover_models,
             sign_in,
             forget_provider,
             save_preferences,
@@ -175,6 +203,7 @@ pub fn run() {
                 show(app.handle(), "usage");
             }
             tauri::async_runtime::spawn(async move {
+                service.initialize_router().await;
                 service.refresh(None).await;
                 let mut elapsed = 0;
                 loop {

@@ -98,4 +98,41 @@ describe("subscription website readers", () => {
     await expect(run({})).rejects.toThrow(/Sign in/);
     dom.window.close();
   });
+  it("Ollama finds each reset below a separate usage header and progress bar", async () => {
+    const dom = new JSDOM();
+    try {
+      const html = `<section>
+        <div><div><span>Monthly usage</span><span>$6 of $20 used</span></div>
+          <div role="progressbar" aria-valuenow="30"></div>
+          <p>Resets <time datetime="2026-10-12T09:15:00-05:00"></time></p></div>
+        <div><div><span>Session usage</span><span>35% used</span></div>
+          <div role="progressbar" aria-valuenow="35"></div>
+          <div class="local-time" data-time="2026-09-08T19:00:00Z">Resets in 3 hours</div></div>
+        <div><div><span>Weekly usage</span><span>74% used</span></div>
+          <div role="progressbar" aria-valuenow="74"></div>
+          <div class="local-time" data-time="2026-09-12T16:00:00Z">Resets in 4 days</div></div>
+      </section>`;
+      const run = reader("ollama", { DOMParser: dom.window.DOMParser, fetch: async () => response(html, 200, "https://ollama.com/settings") });
+      expect((await run({})).windows).toEqual([
+        { label: "Monthly usage", used: 6, limit: 20, resetsAt: "2026-10-12T09:15:00-05:00" },
+        { label: "Session usage", usedPercent: 35, resetsAt: "2026-09-08T19:00:00Z" },
+        { label: "Weekly usage", usedPercent: 74, resetsAt: "2026-09-12T16:00:00Z" },
+      ]);
+    } finally { dom.window.close(); }
+  });
+  it("Ollama never borrows another window's reset or invents one from a duration", async () => {
+    const dom = new JSDOM();
+    try {
+      const html = `<section>
+        <div><div><span>Hourly usage</span><span>10% used</span></div><p>Resets in 2 hours</p></div>
+        <div><div><span>Weekly usage</span><span>70% used</span></div>
+          <div data-time="2026-09-12T16:00:00Z">Resets in 4 days</div></div>
+      </section>`;
+      const run = reader("ollama", { DOMParser: dom.window.DOMParser, fetch: async () => response(html, 200, "https://ollama.com/settings") });
+      expect((await run({})).windows).toEqual([
+        { label: "Hourly usage", usedPercent: 10, resetsAt: null },
+        { label: "Weekly usage", usedPercent: 70, resetsAt: "2026-09-12T16:00:00Z" },
+      ]);
+    } finally { dom.window.close(); }
+  });
 });

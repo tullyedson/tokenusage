@@ -38,3 +38,51 @@ impl IUsageProvider for Ollama {
         UsageSnapshot::new(meters)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn preserves_independent_reset_times_in_usage_meters() {
+        let snapshot = Ollama
+            .parse(
+                json!({ "windows": [
+                    { "label": "Monthly usage", "used": 6, "limit": 20, "resetsAt": "2026-10-12T09:15:00-05:00" },
+                    { "label": "Session usage", "usedPercent": 35, "resetsAt": "2026-09-08T19:00:00Z" },
+                    { "label": "Weekly usage", "usedPercent": 74, "resetsAt": "2026-09-12T16:00:00Z" }
+                ] }),
+                &ProviderConfig::default(),
+            )
+            .unwrap();
+        assert_eq!(snapshot.meters.len(), 3);
+        assert_eq!(snapshot.meters[0].resets_at, Some(1_791_814_500));
+        assert_eq!(snapshot.meters[1].resets_at, Some(1_788_894_000));
+        assert_eq!(snapshot.meters[2].resets_at, Some(1_789_228_800));
+        assert_eq!(snapshot.meters[0].remaining, Some(14.0));
+        assert_eq!(snapshot.meters[1].percent_left, Some(65.0));
+        let payload = serde_json::to_value(snapshot).unwrap();
+        assert_eq!(payload["meters"][2]["resetsAt"], 1_789_228_800_i64);
+    }
+
+    #[test]
+    fn missing_or_invalid_resets_do_not_discard_valid_usage_or_invent_a_date() {
+        let snapshot = Ollama
+            .parse(
+                json!({ "windows": [
+                    { "label": "Hourly usage", "usedPercent": 10, "resetsAt": null },
+                    { "label": "Weekly usage", "usedPercent": 70, "resetsAt": "invalid" }
+                ] }),
+                &ProviderConfig::default(),
+            )
+            .unwrap();
+        assert_eq!(snapshot.meters.len(), 2);
+        assert!(snapshot
+            .meters
+            .iter()
+            .all(|meter| meter.resets_at.is_none()));
+        assert_eq!(snapshot.meters[0].percent_left, Some(90.0));
+        assert_eq!(snapshot.meters[1].percent_left, Some(30.0));
+    }
+}

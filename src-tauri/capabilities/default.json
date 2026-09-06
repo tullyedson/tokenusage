@@ -7,6 +7,7 @@
     "core:event:allow-listen", "core:event:allow-unlisten",
     "allow-bootstrap", "allow-current-page", "allow-refresh-usage",
     "allow-save-provider", "allow-sign-in", "allow-forget-provider",
+    "allow-add-account", "allow-save-routing", "allow-discover-models",
     "allow-save-preferences", "allow-autostart-enabled", "allow-set-autostart"
   ]
 }

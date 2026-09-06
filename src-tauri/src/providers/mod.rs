@@ -4,10 +4,13 @@ mod anthropic;
 mod higgsfield;
 mod ollama;
 mod openai;
+mod opencode;
+mod openrouter;
 mod suno;
 
 use crate::{
     browser::BrowserSession,
+    credentials::ISecretStore,
     model::{ProviderConfig, ProviderDefinition, UsageSnapshot},
 };
 use async_trait::async_trait;
@@ -17,6 +20,7 @@ use std::sync::{atomic::AtomicBool, Arc};
 pub struct FetchContext {
     pub browser: BrowserSession,
     pub cancelled: Arc<AtomicBool>,
+    pub secrets: Arc<dyn ISecretStore>,
 }
 
 pub enum ConnectionOutcome {
@@ -34,7 +38,9 @@ pub struct BrowserSpec {
 #[async_trait]
 pub trait IUsageProvider: Send + Sync {
     fn definition(&self) -> ProviderDefinition;
-    fn browser_spec(&self) -> BrowserSpec;
+    fn browser_spec(&self) -> Option<BrowserSpec> {
+        None
+    }
     fn parse(&self, value: Value, config: &ProviderConfig) -> Result<UsageSnapshot, String>;
     async fn connect(
         &self,
@@ -43,7 +49,12 @@ pub trait IUsageProvider: Send + Sync {
     ) -> Result<ConnectionOutcome, String> {
         context
             .browser
-            .sign_in(self.definition().id, self.browser_spec(), config)
+            .sign_in(
+                self.definition().id,
+                self.browser_spec()
+                    .ok_or("This provider needs an API key connection.")?,
+                config,
+            )
             .await?;
         Ok(ConnectionOutcome::BrowserOpened)
     }
@@ -56,7 +67,8 @@ pub trait IUsageProvider: Send + Sync {
             .browser
             .read(
                 self.definition().id,
-                self.browser_spec(),
+                self.browser_spec()
+                    .ok_or("This provider needs an API key connection.")?,
                 config,
                 &context.cancelled,
             )
@@ -70,6 +82,8 @@ pub fn registry() -> Vec<Arc<dyn IUsageProvider>> {
         Arc::new(openai::OpenAi),
         Arc::new(anthropic::Anthropic),
         Arc::new(ollama::Ollama),
+        Arc::new(openrouter::OpenRouter),
+        Arc::new(opencode::OpenCode),
         Arc::new(suno::Suno),
         Arc::new(higgsfield::Higgsfield),
     ]

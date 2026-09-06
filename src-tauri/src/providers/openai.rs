@@ -22,12 +22,12 @@ impl IUsageProvider for OpenAi {
         ];
         ProviderDefinition { id: "openai", name: "OpenAI", category: "llm", initials: "OA", color: "#87e4b0", description: "Codex allowances included with your ChatGPT subscription. Other ChatGPT model caps are not exposed by this usage source.", help_url: "https://chatgpt.com/codex/settings/usage", fields: vec![connection, SettingField::text("executable", "Codex executable", "Only for the Codex connection. Leave blank to find the installed Codex app or CLI automatically."), SettingField::text("account_id", "ChatGPT account ID", "Optional, for selecting a specific workspace with the website connection.")] }
     }
-    fn browser_spec(&self) -> BrowserSpec {
-        BrowserSpec {
+    fn browser_spec(&self) -> Option<BrowserSpec> {
+        Some(BrowserSpec {
             url: "https://chatgpt.com/codex/settings/usage",
             hosts: &["chatgpt.com"],
             script: include_str!("scripts/openai.js"),
-        }
+        })
     }
     async fn connect(
         &self,
@@ -39,7 +39,11 @@ impl IUsageProvider for OpenAi {
         } else {
             context
                 .browser
-                .sign_in("openai", self.browser_spec(), config)
+                .sign_in(
+                    "openai",
+                    self.browser_spec().ok_or("Missing browser connection.")?,
+                    config,
+                )
                 .await?;
             Ok(ConnectionOutcome::BrowserOpened)
         }
@@ -54,7 +58,12 @@ impl IUsageProvider for OpenAi {
         } else {
             context
                 .browser
-                .read("openai", self.browser_spec(), config, &context.cancelled)
+                .read(
+                    "openai",
+                    self.browser_spec().ok_or("Missing browser connection.")?,
+                    config,
+                    &context.cancelled,
+                )
                 .await?
         };
         self.parse(value, config)

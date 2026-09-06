@@ -6,12 +6,12 @@ impl IUsageProvider for Anthropic {
     fn definition(&self) -> ProviderDefinition {
         ProviderDefinition { id: "anthropic", name: "Anthropic", category: "llm", initials: "An", color: "#dba185", description: "Claude Pro, Max and Team allowances. Sign in to Claude, then return here to refresh.", help_url: "https://claude.ai/settings/usage", fields: vec![SettingField::text("organization", "Organization ID", "Usually automatic. If you belong to multiple Claude organizations, choose the ID for the subscription to track.")] }
     }
-    fn browser_spec(&self) -> BrowserSpec {
-        BrowserSpec {
+    fn browser_spec(&self) -> Option<BrowserSpec> {
+        Some(BrowserSpec {
             url: "https://claude.ai/settings/usage",
             hosts: &["claude.ai"],
             script: include_str!("scripts/anthropic.js"),
-        }
+        })
     }
     fn parse(&self, v: Value, _config: &ProviderConfig) -> Result<UsageSnapshot, String> {
         let mut meters = vec![];

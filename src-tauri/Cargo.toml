@@ -1,6 +1,6 @@
 [package]
 name = "ai-usage-tray"
-version = "0.1.0"
+version = "0.2.0"
 description = "Private AI account usage at a glance in the Windows system tray"
 edition = "2021"
 rust-version = "1.85"
@@ -22,9 +22,11 @@ chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1", features = ["time", "sync", "process", "io-util", "fs", "macros", "rt"] }
 futures-util = "0.3"
 async-trait = "0.1"
+reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls"] }
+zeroize = "1.9"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_Security_Credentials"] }
 
 [dev-dependencies]
 tempfile = "3"

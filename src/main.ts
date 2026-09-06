@@ -1,6 +1,7 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { NativeApi } from "./api";
 import { balance, escapeHtml as esc, meterTone, percent, resetLabel, updatedLabel } from "./format";
+import { clearSecretInputs, readFields, renderField } from "./settings-form";
 import type { Bootstrap, Category, IUsageAppApi, Page, ProviderDefinition, ProviderReport, SettingField, Unsubscribe, UsageMeter } from "./types";
 import "./style.css";
 
@@ -41,9 +42,9 @@ function renderShell(): void {
       <span class="tray-note"><span class="live-dot"></span>In your tray</span>
     </header>
     <main id="content"></main>
-    <footer><span>Private to this Windows account</span><span>AI Usage <span class="version">0.1.0</span></span></footer>
+    <footer><span>Private to this Windows account</span><span>AI Usage <span class="version">0.2.0</span></span></footer>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <dialog id="forget-dialog"><form method="dialog"><span class="eyebrow">DISCONNECT PROVIDER</span><h2>Forget this connection?</h2><p>This clears this app’s saved website session and settings for the provider. Your subscription stays active.</p><div class="form-actions"><button value="cancel" class="secondary">Cancel</button><button value="forget" class="danger">Forget connection</button></div></form></dialog>`;
+    <dialog id="forget-dialog"><form method="dialog"><span class="eyebrow">DISCONNECT PROVIDER</span><h2>Forget this connection?</h2><p>This clears this app’s saved key, website session and settings for the provider. Your subscription stays active.</p><div class="form-actions"><button value="cancel" class="secondary">Cancel</button><button value="forget" class="danger">Forget connection</button></div></form></dialog>`;
   appRoot.querySelectorAll<HTMLButtonElement>("[data-page]").forEach(button => button.addEventListener("click", () => navigate(button.dataset.page === "settings" ? "settings" : "usage")));
   appRoot.querySelector(".brand")?.addEventListener("click", event => { event.preventDefault(); navigate("usage"); });
   renderPage();
@@ -73,7 +74,7 @@ function meterHtml(meter: UsageMeter): string {
 }
 function providerCard(provider: ProviderDefinition): string {
   const report = reportFor(provider.id);
-  const status = report?.refreshing ? "Refreshing" : report?.error ? "Needs attention" : report?.snapshot ? "Connected" : "Awaiting sign-in";
+  const status = report?.refreshing ? "Refreshing" : report?.error ? "Needs attention" : report?.snapshot ? "Connected" : "Awaiting connection";
   const stale = Boolean(report?.error && report.snapshot);
   return `<article class="usage-card${stale ? " stale" : ""}" data-provider="${esc(provider.id)}">
     <div class="card-header">${icon(provider)}<div class="provider-heading"><h2>${esc(provider.name)}</h2><span>${esc(report?.snapshot?.plan ?? categories.find(category => category.id === provider.category)?.title ?? "")}</span></div>
@@ -101,11 +102,7 @@ function bindUsage(): void {
 }
 
 function fieldHtml(provider: ProviderDefinition, field: SettingField): string {
-  const id = `${provider.id}-${field.key}`;
-  const value = data.settings.providers[provider.id]?.fields[field.key] ?? "";
-  const control = field.kind === "select" ? `<select id="${esc(id)}" name="${esc(field.key)}">${field.options.map(option => `<option value="${esc(option.value)}" ${value === option.value ? "selected" : ""}>${esc(option.label)}</option>`).join("")}</select>`
-    : `<input id="${esc(id)}" name="${esc(field.key)}" type="${field.kind === "number" ? "number" : "text"}" ${field.kind === "number" ? 'min="0.000001" step="any"' : ""} value="${esc(value)}" placeholder="${esc(field.placeholder)}" autocomplete="off" spellcheck="false" />`;
-  return `<div class="field"><label for="${esc(id)}">${esc(field.label)}</label>${control}<small>${esc(field.help)}</small></div>`;
+  return renderField(provider.id, field, data.settings.providers[provider.id]?.fields[field.key] ?? "", data.configuredSecrets[provider.id]?.includes(field.key) ?? false);
 }
 function providerSettings(provider: ProviderDefinition): string {
   const config = data.settings.providers[provider.id];
@@ -114,7 +111,7 @@ function providerSettings(provider: ProviderDefinition): string {
     <form data-provider-form="${esc(provider.id)}"><p class="provider-description">${esc(provider.description)}</p>
       <label class="toggle-row"><span>Track this provider</span><input type="checkbox" name="enabled" ${config?.enabled ? "checked" : ""} /><span class="toggle" aria-hidden="true"></span></label>
       <div class="fields">${provider.fields.map(field => fieldHtml(provider, field)).join("")}</div>
-      <p class="session-note"><span aria-hidden="true">▣</span> Sign in directly with the provider. This app keeps a separate website session on this PC.</p>
+      <p class="session-note"><span aria-hidden="true">▣</span> ${provider.fields.some(field => field.kind === "secret") ? "Enter your provider key above, then connect. A blank key field keeps the saved key." : "Sign in directly with the provider. This app keeps a separate website session on this PC."}</p>
       <div class="form-actions"><button type="submit" class="primary">Save settings</button><button type="button" class="secondary" data-connect="${esc(provider.id)}">Connect account ↗</button><button type="button" class="text-button forget" data-forget="${esc(provider.id)}" ${config ? "" : "disabled"}>Forget</button></div>
     </form></details>`;
 }
@@ -127,12 +124,13 @@ function settingsPage(): string {
       const providers = data.providers.filter(provider => provider.category === category.id);
       const enabled = providers.filter(provider => data.settings.providers[provider.id]?.enabled).length;
       return `<details class="category"><summary><span class="category-icon">${category.icon}</span><span class="category-name"><strong>${category.title}</strong><small>${category.description}</small></span><span class="category-count">${enabled ? `${enabled} enabled · ` : ""}${providers.length} provider${providers.length === 1 ? "" : "s"}</span><span class="chevron">›</span></summary><div class="category-body">${providers.length ? providers.map(providerSettings).join("") : '<p class="category-empty">No speech providers added yet.</p>'}</div></details>`;
-    }).join("")}</section><p class="privacy-note">Sessions stay in this app’s private browser profiles. Usage readers only request balances and allowances. Some providers may ask you to sign in again when a session expires.</p>`;
+    }).join("")}</section><p class="privacy-note">Keys are saved in Windows Credential Manager. Website sessions stay in this app’s private browser profiles. Usage readers only request balances and allowances.</p>`;
 }
-function fieldsFrom(form: HTMLFormElement): Record<string, string> {
-  const fields: Record<string, string> = {};
-  form.querySelectorAll<HTMLInputElement | HTMLSelectElement>(".fields input, .fields select").forEach(input => { fields[input.name] = input.value.trim(); });
-  return fields;
+async function saveForm(form: HTMLFormElement, id: string, enabled: boolean): Promise<void> {
+  const { fields, secrets } = readFields(form);
+  try { await api.saveProvider(id, enabled, fields, secrets); clearSecretInputs(form); }
+  finally { for (const key of Object.keys(secrets)) delete secrets[key]; }
+  await reloadData(); updateSetupStatus();
 }
 async function withForm(form: HTMLFormElement, action: () => Promise<void>): Promise<void> {
   const buttons = form.querySelectorAll<HTMLButtonElement>("button");
@@ -158,13 +156,13 @@ function bindSettings(): void {
     const id = form.dataset.providerForm ?? "";
     form.addEventListener("submit", event => {
       event.preventDefault();
-      void withForm(form, async () => { await api.saveProvider(id, form.querySelector<HTMLInputElement>('[name="enabled"]')?.checked ?? false, fieldsFrom(form)); await reloadData(); updateSetupStatus(); notify("Provider settings saved."); if (data.settings.providers[id]?.enabled) void refresh(id); });
+      void withForm(form, async () => { await saveForm(form, id, form.querySelector<HTMLInputElement>('[name="enabled"]')?.checked ?? false); notify("Provider settings saved."); if (data.settings.providers[id]?.enabled) void refresh(id); });
     });
     form.querySelector("[data-connect]")?.addEventListener("click", () => {
       if (!form.reportValidity()) return;
       void withForm(form, async () => {
         const toggle = form.querySelector<HTMLInputElement>('[name="enabled"]'); if (toggle) toggle.checked = true;
-        await api.saveProvider(id, true, fieldsFrom(form)); await reloadData();
+        await saveForm(form, id, true);
         const message = await api.connect(id); updateSetupStatus(); notify(message);
       });
     });
@@ -178,6 +176,9 @@ function bindSettings(): void {
 function updateSetupStatus(): void {
   appRoot.querySelectorAll<HTMLDetailsElement>(".provider-settings").forEach(detail => {
     const id = detail.dataset.provider ?? "";
+    detail.querySelectorAll<HTMLInputElement>("input[data-secret]").forEach(input => {
+      input.placeholder = data.configuredSecrets[id]?.includes(input.name) ? "Key saved. Leave blank to keep it." : "Paste a key";
+    });
     const status = detail.querySelector(".setup-state");
     if (!status) return;
     const connected = Boolean(data.settings.providers[id]?.enabled && reportFor(id)?.snapshot);

@@ -6,12 +6,12 @@ impl IUsageProvider for Suno {
     fn definition(&self) -> ProviderDefinition {
         ProviderDefinition { id: "suno", name: "Suno", category: "music", initials: "Su", color: "#edb276", description: "Read subscription and total credits from your signed-in Suno account.", help_url: "https://suno.com/account", fields: vec![SettingField::number("allowance", "Total-credit reference allowance", "Optional. Used only for the total-credit bar when Suno does not supply its denominator. Include top-ups if that is the balance you want to compare.")] }
     }
-    fn browser_spec(&self) -> BrowserSpec {
-        BrowserSpec {
+    fn browser_spec(&self) -> Option<BrowserSpec> {
+        Some(BrowserSpec {
             url: "https://suno.com/account",
             hosts: &["suno.com", "www.suno.com"],
             script: include_str!("scripts/suno.js"),
-        }
+        })
     }
     fn parse(&self, v: Value, config: &ProviderConfig) -> Result<UsageSnapshot, String> {
         let mut meters = vec![];

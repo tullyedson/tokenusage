@@ -6,7 +6,7 @@ Read `README.md` and `docs/ADDING_PROVIDERS.md` before extending the app.
 - The tray menu is exactly Show usage, Settings and Exit. Single and double left clicks show Usage. Closing the main window hides it.
 - Providers implement `IUsageProvider` and register in `providers::registry()`. Provider metadata drives the frontend. Do not add provider-ID branches to the service or UI.
 - Consumer subscription allowances take priority. API credits and consumer subscriptions are different sources; label each reading accurately.
-- Configuration DTOs carry nonsecret values only. Website authentication belongs to isolated WebView2 sessions. A future direct-key transport needs a native credential-store boundary.
+- Configuration DTOs carry nonsecret values only. Website authentication belongs to isolated WebView2 sessions. Declare native keys with secret-field metadata and use `ISecretStore`; never return saved key values to HTML or put them in ordinary fields. Use the bounded GET-only HTTPS transport for native usage reads.
 - Retain stale readings with an error; never fabricate percentages, balances, reset times or successful connections.
 - Disabled providers must stop refreshes. Honor cancellation and configuration revisions, including during process and browser work.
 - Remote provider pages have no native-command permissions. Readers return only quota fields and run on exact allowed HTTPS hosts.

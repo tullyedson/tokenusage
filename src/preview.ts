@@ -7,6 +7,8 @@ const providers: ProviderDefinition[] = [
   { id: "ollama", name: "Ollama Cloud", category: "llm", initials: "Ol", color: "#d2d8e0", description: "Cloud usage from Ollama settings.", helpUrl: "https://ollama.com/settings", fields: [] },
   { id: "suno", name: "Suno", category: "music", initials: "Su", color: "#edb276", description: "Your monthly and total credits.", helpUrl: "https://suno.com/account", fields: [{ key: "allowance", label: "Total-credit reference allowance", kind: "number", help: "Only used if the provider has no total allowance.", placeholder: "Optional", options: [] }] },
   { id: "higgsfield", name: "Higgsfield", category: "media", initials: "Hi", color: "#b8a3ef", description: "Your subscription wallet.", helpUrl: "https://higgsfield.ai/me/settings/subscription", fields: [] },
+  { id: "openrouter", name: "OpenRouter", category: "llm", initials: "OR", color: "#afa8f4", description: "Account credits or a single key's allowance.", helpUrl: "https://openrouter.ai/settings/keys", fields: [{ key: "connection", label: "Usage source", kind: "select", help: "Account credits require a management key.", placeholder: "", options: [{ value: "credits", label: "Account credits (management key)" }, { value: "key", label: "This key's allowance (standard key)" }] }, { key: "api_key", label: "OpenRouter key", kind: "secret", help: "Saved in Windows Credential Manager in the desktop app.", placeholder: "Paste a key", options: [] }] },
+  { id: "opencode", name: "OpenCode", category: "llm", initials: "OC", color: "#e0dcd3", description: "OpenCode Go subscription allowances.", helpUrl: "https://opencode.ai/auth", fields: [{ key: "api_key", label: "OpenCode API key", kind: "secret", help: "Use a key from the workspace with your Go subscription.", placeholder: "Paste a key", options: [] }] },
 ];
 
 function sample(label: string, percentLeft: number, hours: number, remaining: number | null = null, limit: number | null = null, unit = "%"): UsageMeter {
@@ -16,15 +18,17 @@ function fixture(): Bootstrap {
   const empty = new URLSearchParams(location.search).has("empty");
   const reports: ProviderReport[] = providers.map((provider, index) => ({
     providerId: provider.id, updatedAt: Math.floor(Date.now() / 1000) - 30, attemptedAt: Math.floor(Date.now() / 1000) - 30, refreshing: false, error: null,
-    snapshot: { plan: ["Pro", "Max", "Pro", "Pro", "Ultimate"][index] ?? null, note: null, meters: [
+    snapshot: { plan: ["Pro", "Max", "Pro", "Pro", "Ultimate", "Account credits", "Go subscription"][index] ?? null, note: null, meters: [
       [sample("5-hour allowance", 74, 3), sample("Weekly allowance", 42, 58)],
       [sample("5-hour allowance", 91, 4), sample("Weekly allowance", 18, 94)],
       [sample("Monthly usage", 62, 270, 62, 100, "USD")],
       [sample("Monthly credits", 68, 155, 1700, 2500, "credits")],
       [sample("Subscription credits", 36, 188, 1080, 3000, "credits")],
+      [{ ...sample("Account credits", 75, 0, 75, 100, "USD"), resetsAt: null }],
+      [sample("5-hour allowance", 75, 3), sample("Weekly allowance", 50, 62), sample("Monthly allowance", 40, 182)],
     ][index] ?? [] },
   }));
-  return { providers, settings: { version: 1, refreshMinutes: 5, providers: empty ? {} : Object.fromEntries(providers.map(provider => [provider.id, { enabled: true, fields: {}, sessionGeneration: 0, revision: 0 }])) }, reports: empty ? [] : reports, startupError: null };
+  return { providers, settings: { version: 1, refreshMinutes: 5, providers: empty ? {} : Object.fromEntries(providers.map(provider => [provider.id, { enabled: true, fields: {}, sessionGeneration: 0, revision: 0 }])) }, reports: empty ? [] : reports, startupError: null, configuredSecrets: {} };
 }
 export class PreviewApi implements IUsageAppApi {
   private data = fixture();
@@ -34,7 +38,7 @@ export class PreviewApi implements IUsageAppApi {
   async bootstrap(): Promise<Bootstrap> { return structuredClone(this.data); }
   async currentPage(): Promise<Page> { return location.hash === "#settings" ? "settings" : "usage"; }
   async refresh(): Promise<void> { this.usage?.(structuredClone(this.data.reports)); }
-  async saveProvider(id: string, enabled: boolean, fields: Record<string, string>): Promise<void> { this.data.settings.providers[id] = { enabled, fields, sessionGeneration: 0, revision: 0 }; this.changed?.(); }
+  async saveProvider(id: string, enabled: boolean, fields: Record<string, string>, secrets: Record<string, string>): Promise<void> { if (Object.values(secrets).some(Boolean)) throw new Error("Key storage is available in the desktop app. This is a browser preview."); this.data.settings.providers[id] = { enabled, fields, sessionGeneration: 0, revision: 0 }; this.changed?.(); }
   async connect(): Promise<string> { throw new Error("Sign-in is available in the desktop app. This is a browser preview."); }
   async forget(id: string): Promise<void> { delete this.data.settings.providers[id]; this.data.reports = this.data.reports.filter(report => report.providerId !== id); this.changed?.(); }
   async savePreferences(refreshMinutes: number): Promise<void> { this.data.settings.refreshMinutes = refreshMinutes; }

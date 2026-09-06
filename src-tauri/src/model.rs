@@ -48,6 +48,13 @@ impl SettingField {
             ..Self::text(key, label, help)
         }
     }
+    pub fn secret(key: &'static str, label: &'static str, help: &'static str) -> Self {
+        Self {
+            kind: "secret",
+            placeholder: "Paste a key",
+            ..Self::text(key, label, help)
+        }
+    }
 }
 
 #[derive(Clone, Default, Deserialize, Serialize, PartialEq)]

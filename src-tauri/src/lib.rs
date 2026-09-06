@@ -1,7 +1,10 @@
 mod browser;
 mod codex;
+mod credentials;
+mod http;
 pub mod model;
 mod persistence;
+mod provider_settings;
 pub mod providers;
 mod service;
 
@@ -59,8 +62,11 @@ async fn save_provider(
     provider_id: String,
     enabled: bool,
     fields: BTreeMap<String, String>,
+    secrets: BTreeMap<String, String>,
 ) -> Result<(), String> {
-    service.save_provider(&provider_id, enabled, fields).await
+    service
+        .save_provider(&provider_id, enabled, fields, secrets)
+        .await
 }
 #[tauri::command]
 async fn sign_in(

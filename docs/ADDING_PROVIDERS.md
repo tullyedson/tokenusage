@@ -16,14 +16,18 @@ That is enough to make the provider appear in both Settings and Usage. Choose an
 | Method | Responsibility |
 | --- | --- |
 | `definition()` | Stable ID, name, category, initials, color, description, help URL and setting-field metadata |
-| `browser_spec()` | HTTPS sign-in/usage URL, exact allowed reader hostnames and bundled reader script |
+| `browser_spec()` | `Some(BrowserSpec)` for an HTTPS sign-in/usage URL, exact allowed reader hostnames and bundled reader script; defaults to `None` for native connections |
 | `parse(value, config)` | Convert a source response into validated `UsageSnapshot` and `UsageMeter` DTOs |
 | `connect(context, config)` | Default opens the provider's isolated sign-in browser and returns `BrowserOpened`. Override for another connection and return `Ready` when an immediate usage read can run |
 | `fetch(context, config)` | Default reads the website then calls `parse`. Override for another transport, honoring `context.cancelled` and bounding all network/process waits |
 
-`ProviderDefinition.fields` currently supports `text`, `number` and `select`. These fields are for **nonsecret configuration only**, such as workspace IDs, executable paths and reference allowances. Do not put passwords, API keys or session cookies in them. Initial providers authenticate in their own WebView2 session; a future direct-key transport should use a native credential store and a dedicated secret-setting boundary, never plain settings JSON.
+`ProviderDefinition.fields` supports `text`, `number`, `select` and `secret`. Text, number and select values are **nonsecret configuration only**, such as workspace IDs, executable paths and reference allowances. Declare a key with `SettingField::secret("api_key", "API key", "Help text")`. The generic frontend renders a blank password input and sends its value in a separate `secrets` argument to `save_provider`. Native validation rejects secret fields in the ordinary fields map, and only nonsecret fields enter `ProviderConfig` or settings JSON.
 
-`FetchContext` provides the browser session and cancellation flag. Both public interfaces use methods; DTOs carry data. Provider internals stay out of the UI, service scheduler and persistence layer.
+The service saves secret values through the method-only `ISecretStore` boundary, currently backed by Windows Credential Manager. `Bootstrap.configuredSecrets` contains field names whose keys are saved, never values. Blank secrets mean preserve the saved value. Credential changes are rolled back if the atomic settings save fails. Forget deletes the provider's secret fields. Do not read the vault directly from a provider or expose a command to retrieve keys into HTML; use `context.secrets.get(provider_id, field)` in native Rust. Retrieved strings use `Zeroizing` buffers.
+
+`FetchContext` provides the browser session, cancellation flag and an `ISecretStore`. Interfaces use methods; DTOs carry data. Provider internals stay out of the UI, service scheduler and persistence layer.
+
+The OpenRouter and OpenCode adapters demonstrate native-key connections. Return `Ready` from `connect`, load the key in `fetch`, and call `http::get_usage` with a verified constant HTTPS endpoint and the cancellation flag. This transport permits GET only, rejects redirects, uses bounded waits and response sizes, and returns redacted errors. Parse only quota fields into a `UsageSnapshot`. Avoid logging raw responses, keys or account identity. Use a helpful static 403 message when the source requires a specific key type or subscription.
 
 The OpenAI adapter demonstrates an optional local-process transport without special cases in the service or dashboard. It launches a hidden, bounded subprocess, issues only the usage request, and terminates the subprocess on completion, failure or cancellation.
 
@@ -59,7 +63,7 @@ Remote provider windows have no native-command capability. Native Rust evaluates
 
 ## Lifecycle and tests
 
-The service serializes refreshes per provider, retains a failed refresh's last successful reading, and reports errors separately. Every save changes a configuration revision and cancels the active fetch. A late result from an earlier configuration is discarded. Disabling stops work and closes provider windows. Forget cancels reads, clears this app's session and advances its profile generation so the old cookies cannot be reused.
+The service serializes refreshes per provider, retains a failed refresh's last successful reading, and reports errors separately. Every save changes a configuration revision and cancels the active fetch. A late result from an earlier configuration is discarded. Disabling stops work and closes provider windows. Forget cancels reads, removes saved keys, clears an optional browser session and advances its profile generation so old cookies cannot be reused.
 
 Use fictional payload fixtures for consumption-to-remaining conversion, multiple windows, missing limits, exhausted quotas, unexpected login pages and changed response shapes. Test the actual JavaScript reader with mocked fetch. Keep pure parser tests on the concrete provider type: constructing the whole dynamic registry drags Windows UI imports into a Rust test executable that lacks the application's UI manifest.
 

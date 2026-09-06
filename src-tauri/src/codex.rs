@@ -65,7 +65,7 @@ pub async fn read_limits(configured: &str, cancelled: &AtomicBool) -> Result<Val
     let result = tokio::time::timeout(Duration::from_secs(35), async {
         let mut input = child.stdin.take().ok_or("Could not open the Codex reader input.")?;
         let output = child.stdout.take().ok_or("Could not read Codex output.")?;
-        let init = json!({"id":1,"method":"initialize","params":{"clientInfo":{"name":"ai_usage_tray","title":"AI Usage","version":"0.1.0"},"capabilities":{"experimentalApi":false}}});
+        let init = json!({"id":1,"method":"initialize","params":{"clientInfo":{"name":"ai_usage_tray","title":"AI Usage","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":false}}});
         input.write_all(format!("{init}\n").as_bytes()).await.map_err(|_| "Could not initialize Codex.")?;
         let mut lines = BufReader::new(output).lines();
         let mut initialized = false;

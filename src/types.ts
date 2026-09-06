@@ -7,14 +7,14 @@ export type Settings = { version: number; refreshMinutes: number; providers: Rec
 export type UsageMeter = { label: string; remaining: number | null; limit: number | null; percentLeft: number | null; unit: string; resetsAt: number | null; note: string | null };
 export type UsageSnapshot = { meters: UsageMeter[]; plan: string | null; note: string | null };
 export type ProviderReport = { providerId: string; snapshot: UsageSnapshot | null; updatedAt: number | null; attemptedAt: number | null; error: string | null; refreshing: boolean };
-export type Bootstrap = { providers: ProviderDefinition[]; settings: Settings; reports: ProviderReport[]; startupError: string | null };
+export type Bootstrap = { providers: ProviderDefinition[]; settings: Settings; reports: ProviderReport[]; startupError: string | null; configuredSecrets: Record<string, string[]> };
 export type Unsubscribe = () => void;
 
 export interface IUsageAppApi {
   bootstrap(): Promise<Bootstrap>;
   currentPage(): Promise<Page>;
   refresh(providerId?: string): Promise<void>;
-  saveProvider(providerId: string, enabled: boolean, fields: Record<string, string>): Promise<void>;
+  saveProvider(providerId: string, enabled: boolean, fields: Record<string, string>, secrets: Record<string, string>): Promise<void>;
   connect(providerId: string): Promise<string>;
   forget(providerId: string): Promise<void>;
   savePreferences(refreshMinutes: number): Promise<void>;

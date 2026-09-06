@@ -6,12 +6,12 @@ impl IUsageProvider for Higgsfield {
     fn definition(&self) -> ProviderDefinition {
         ProviderDefinition { id: "higgsfield", name: "Higgsfield", category: "media", initials: "Hi", color: "#b8a3ef", description: "Read the subscription wallet for the workspace selected in your Higgsfield account.", help_url: "https://higgsfield.ai/me/settings/subscription", fields: vec![SettingField::number("allowance", "Total-credit reference allowance", "Optional denominator for the total-credit bar. Subscription credits use the allowance reported by Higgsfield.")] }
     }
-    fn browser_spec(&self) -> BrowserSpec {
-        BrowserSpec {
+    fn browser_spec(&self) -> Option<BrowserSpec> {
+        Some(BrowserSpec {
             url: "https://higgsfield.ai/me/settings/subscription",
             hosts: &["higgsfield.ai"],
             script: include_str!("scripts/higgsfield.js"),
-        }
+        })
     }
     fn parse(&self, v: Value, config: &ProviderConfig) -> Result<UsageSnapshot, String> {
         let mut meters = vec![];

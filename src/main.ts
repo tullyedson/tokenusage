@@ -50,7 +50,7 @@ function renderShell(): void {
       <span class="tray-note"><span class="live-dot"></span>In your tray</span>
     </header>
     <main id="content"></main>
-    <footer><span>Private to this Windows account</span><span>AI Usage <span class="version">0.3.0</span></span></footer>
+    <footer><span>Private to this Windows account</span><span>AI Usage <span class="version">0.3.1</span></span></footer>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <dialog id="forget-dialog"><form method="dialog"><span class="eyebrow">DISCONNECT PROVIDER</span><h2>Forget this connection?</h2><p>This clears this app’s saved key, website session and settings for the provider. Your subscription stays active.</p><div class="form-actions"><button value="cancel" class="secondary">Cancel</button><button value="forget" class="danger">Forget connection</button></div></form></dialog>`;
   appRoot.querySelectorAll<HTMLButtonElement>("[data-page]").forEach(button => button.addEventListener("click", () => navigate(button.dataset.page === "settings" ? "settings" : button.dataset.page === "routing" ? "routing" : "usage")));

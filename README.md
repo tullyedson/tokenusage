@@ -27,7 +27,7 @@ Settings categories are **LLM**, **Music**, **Speech** and **Media**. Speech is 
 | --- | --- | --- |
 | OpenAI | LLM | Codex subscription windows and additional credit balance, through the signed-in Codex app server or ChatGPT's Codex usage page |
 | Anthropic | LLM | Claude's five-hour and weekly windows, available model-specific windows and enabled extra-usage spending allowance |
-| Ollama Cloud | LLM | Monthly included-credit spending and any session, hourly or weekly percentages shown in settings |
+| Ollama Cloud | LLM | Monthly included-credit spending and any session, hourly or weekly percentages, with each window's reported reset date and local time |
 | OpenRouter | LLM | Account USD credit balance with a management key, or a standard key's remaining spending allowance |
 | OpenCode | LLM | Go subscription five-hour, weekly and monthly percentages and reset times, using an API key from the subscribed workspace |
 | Suno | Music | Monthly subscription credits and total remaining credits, including top-ups |

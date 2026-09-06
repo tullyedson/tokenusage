@@ -88,6 +88,12 @@ impl IUsageProvider for OpenAi {
                         .as_str()
                         .or_else(|| bucket["metered_feature"].as_str())
                         .unwrap_or("Additional allowance");
+                    if is_spark_allowance(
+                        bucket["metered_feature"].as_str().unwrap_or_default(),
+                        name,
+                    ) {
+                        continue;
+                    }
                     append_web(&mut meters, name, &bucket["rate_limit"])?;
                 }
             }
@@ -99,6 +105,10 @@ impl IUsageProvider for OpenAi {
         snapshot.note = Some("Codex subscription usage".into());
         Ok(snapshot)
     }
+}
+
+fn is_spark_allowance(id: &str, name: &str) -> bool {
+    id.eq_ignore_ascii_case("codex_bengalfox") || name.to_ascii_lowercase().contains("codex-spark")
 }
 
 fn window_name(minutes: Option<f64>, fallback: &str) -> String {
@@ -122,6 +132,9 @@ fn append_codex(
     bucket: &Value,
 ) -> Result<(), String> {
     let name = bucket["limitName"].as_str().unwrap_or(id);
+    if is_spark_allowance(id, name) {
+        return Ok(());
+    }
     for (key, fallback) in [
         ("primary", "Primary allowance"),
         ("secondary", "Secondary allowance"),
@@ -211,5 +224,60 @@ mod tests {
         let s = OpenAi.parse(serde_json::json!({"rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":18000,"reset_at":1800000000}},"plan_type":"pro"}), &ProviderConfig::default()).unwrap();
         assert_eq!(s.meters[0].percent_left, Some(75.0));
         assert_eq!(s.plan.as_deref(), Some("pro"));
+    }
+
+    #[test]
+    fn signed_in_codex_keeps_weekly_allowance_without_spark_windows() {
+        for (id, name) in [
+            ("codex_bengalfox", "Additional allowance"),
+            ("another-id", "GPT-5.3-Codex-Spark"),
+        ] {
+            let value = serde_json::json!({
+                "rateLimitsByLimitId": {
+                    "codex": {"planType": "pro", "primary": {
+                        "usedPercent": 40, "windowDurationMins": 10080,
+                        "resetsAt": 1800000000
+                    }},
+                    (id): {"limitName": name,
+                        "primary": {"usedPercent": 10, "windowDurationMins": 300},
+                        "secondary": {"usedPercent": 20, "windowDurationMins": 10080}
+                    }
+                }
+            });
+            let snapshot = OpenAi.parse(value, &ProviderConfig::default()).unwrap();
+            assert_eq!(snapshot.meters.len(), 1);
+            assert_eq!(snapshot.meters[0].label, "codex · 1-week allowance");
+            assert_eq!(snapshot.meters[0].percent_left, Some(60.0));
+            assert_eq!(snapshot.meters[0].resets_at, Some(1800000000));
+            assert_eq!(snapshot.plan.as_deref(), Some("pro"));
+        }
+    }
+
+    #[test]
+    fn website_keeps_weekly_allowance_without_spark_windows() {
+        for (id, name) in [
+            ("codex_bengalfox", "Additional allowance"),
+            ("another-id", "GPT-5.3-Codex-Spark"),
+        ] {
+            let value = serde_json::json!({
+                "plan_type": "pro",
+                "rate_limit": {"primary_window": {
+                    "used_percent": 40, "limit_window_seconds": 604800,
+                    "reset_at": 1800000000
+                }},
+                "additional_rate_limits": [{"metered_feature": id, "limit_name": name,
+                    "rate_limit": {
+                        "primary_window": {"used_percent": 10, "limit_window_seconds": 18000},
+                        "secondary_window": {"used_percent": 20, "limit_window_seconds": 604800}
+                    }
+                }]
+            });
+            let snapshot = OpenAi.parse(value, &ProviderConfig::default()).unwrap();
+            assert_eq!(snapshot.meters.len(), 1);
+            assert_eq!(snapshot.meters[0].label, "Codex · 1-week allowance");
+            assert_eq!(snapshot.meters[0].percent_left, Some(60.0));
+            assert_eq!(snapshot.meters[0].resets_at, Some(1800000000));
+            assert_eq!(snapshot.plan.as_deref(), Some("pro"));
+        }
     }
 }

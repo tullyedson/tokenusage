@@ -2,6 +2,8 @@
 
 ## Automated checks
 
+Version 0.3.2 Spark-meter checks on 2026-09-06: 36 Rust tests and 20 frontend tests pass, with strict Clippy and production TypeScript/Vite compilation. Two new parser regressions reproduced three meters before the change and pass with only the normal weekly allowance afterward. Both signed-in Codex and website payloads are covered, including identification by the provider's Spark bucket ID or display name, with the regular percentage, reset and plan preserved. The optional signed-in Codex integration test also passes against the installed account without printing account data. The OpenAI website path remains fixture-tested.
+
 Version 0.3.1 reset-time checks on 2026-09-06: 34 Rust tests and 20 frontend tests pass, with strict Clippy and production TypeScript/Vite compilation. Two new website-reader fixtures failed before the fix and pass afterward. They cover reset elements below separate usage headers/bars, monthly dollar balances, independent session/weekly dates, and a missing hourly timestamp that must not borrow the weekly reset. Two native parser tests confirm UTC-offset conversion, serialized reset timestamps, and preservation of valid usage when a reset is missing or invalid. The reader now continues within the same usage window after finding its amount, allowing the existing dashboard to display the reported reset in local time. This change has not been verified against a live Ollama session.
 
 Version 0.3.0 routing checks on 2026-09-06: 32 Rust tests and 18 frontend tests pass, with strict Clippy and production TypeScript/Vite compilation. New tests exercise the actual loopback listener and HTTP transport with fictional upstream servers: ordered account failover on 429, reset recovery with an injected clock, exact-model precedence over substitutions, stopping on unavailable routes, separate account keys, JSON/SSE forwarding, non-replay after terminal errors, key rotation, Host/Origin checks, listener shutdown, real vLLM/Ollama adapter code, cloud-alias rejection, and cancellation while the caller stops reading a stream. Migration preserves version 1 account IDs and browser generations. The headless HTML app test adds a second account, discovers and maps a model, reorders accounts and saves fallback rules through mocked native commands.
@@ -24,9 +26,13 @@ After the project folder moved, cached Tauri permission manifests still referenc
 
 ## Desktop observations
 
+The version 0.3.2 NSIS installer was applied in silent update mode while the router had no open client connections. The installed executable matches the verified installer payload, settings remain byte-identical, and the Windows startup preference is unchanged. The app restarted hidden in the tray. OpenCode's existing client key successfully read the router model catalog and its previous local model route remained available. No desktop interaction or screenshot verification was performed for this update.
+
 The native app opened successfully, and the dashboard layout was inspected. Desktop control stopped when the user took back the PC. Subsequent work uses background commands only.
 
 ## Packaged release
+
+The version 0.3.2 Windows x64 NSIS installer passed archive integrity and product-version checks on 2026-09-06. The packaged executable differs from the optimized build only in Tauri's three-byte UNK-to-NSS bundle marker; a complete byte comparison verified no other differences. The silent installed executable exactly matches that packaged payload.
 
 The version 0.3.1 Windows x64 NSIS installer was built on 2026-09-06 with the Ollama reset fix. Archive integrity, the current-user installer configuration, product/file version 0.3.1, Common Controls version 6, and production fixture exclusion pass. Its extracted application matches the final build after the same in-memory Tauri bundle-marker normalization described below. The 94-file source audit found no credentials or account data. It has not been installed or launched; the running app and its sessions were left untouched.
 
@@ -49,4 +55,4 @@ These require the user's account sign-ins or an uninterrupted desktop session:
 - Installer UI, uninstall UI and optional Windows startup after an actual install.
 - Version 0.3 routing UI in the native window, live local model generation, OpenRouter free-model generation, caller streaming/disconnect behavior, and installed router startup/shutdown. All current routing verification uses fictional local HTTP fixtures and the headless HTML test.
 
-The installer is provided for user-controlled installation. Creating the package does not install it or change Windows startup settings.
+Creating an installer does not install it or change Windows startup settings. The separate 0.3.2 silent upgrade and its verified scope are recorded above; interactive installation and uninstall UI remain user-controlled checks.

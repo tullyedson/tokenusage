@@ -1,0 +1,66 @@
+# Adding a provider
+
+The extension boundary is `IUsageProvider` in `src-tauri/src/providers/mod.rs`. Every production setting and usage card is built from its DTOs. The frontend contains no provider-specific connection or parsing branches.
+
+## Files to add or change
+
+1. Add `src-tauri/src/providers/example.rs`, implementing `IUsageProvider`.
+2. For a website session, add the reader expression in `src-tauri/src/providers/scripts/example.js` and include it in `browser_spec()`.
+3. Declare the module and add `Arc::new(example::Example)` in `registry()`.
+4. Add parser fixtures in the Rust module and reader tests in `tests/provider-scripts.test.mjs`.
+
+That is enough to make the provider appear in both Settings and Usage. Choose an existing category: `llm`, `music`, `speech` or `media`. IDs must be unique, stable lowercase letters, digits or hyphens because they are also used as session-profile identifiers.
+
+## Contract
+
+| Method | Responsibility |
+| --- | --- |
+| `definition()` | Stable ID, name, category, initials, color, description, help URL and setting-field metadata |
+| `browser_spec()` | HTTPS sign-in/usage URL, exact allowed reader hostnames and bundled reader script |
+| `parse(value, config)` | Convert a source response into validated `UsageSnapshot` and `UsageMeter` DTOs |
+| `connect(context, config)` | Default opens the provider's isolated sign-in browser and returns `BrowserOpened`. Override for another connection and return `Ready` when an immediate usage read can run |
+| `fetch(context, config)` | Default reads the website then calls `parse`. Override for another transport, honoring `context.cancelled` and bounding all network/process waits |
+
+`ProviderDefinition.fields` currently supports `text`, `number` and `select`. These fields are for **nonsecret configuration only**, such as workspace IDs, executable paths and reference allowances. Do not put passwords, API keys or session cookies in them. Initial providers authenticate in their own WebView2 session; a future direct-key transport should use a native credential store and a dedicated secret-setting boundary, never plain settings JSON.
+
+`FetchContext` provides the browser session and cancellation flag. Both public interfaces use methods; DTOs carry data. Provider internals stay out of the UI, service scheduler and persistence layer.
+
+The OpenAI adapter demonstrates an optional local-process transport without special cases in the service or dashboard. It launches a hidden, bounded subprocess, issues only the usage request, and terminates the subprocess on completion, failure or cancellation.
+
+## Meter semantics
+
+Use `UsageMeter::used_percent(label, used, reset)` when the source reports percent consumed. The helper calculates percent remaining and clamps an exhausted allowance to zero. Use `UsageMeter::balance(label, remaining, limit, unit, reset)` for credits, money or tokens. Pass `None` when the limit is unknown. Never fabricate a denominator from a plan name or merge unrelated windows. Purchased top-ups may make a total balance larger than the recurring allowance.
+
+Reset timestamps are UTC Unix seconds. The `timestamp()` helper also accepts RFC 3339 input. A missing value stays absent. `UsageSnapshot::new()` rejects empty readings, so a login page or changed response cannot silently become a zero-usage success.
+
+Do not hardcode a weekly, hourly or monthly window when the provider actually gives its duration. Include model-specific windows as separate meters. Attach a note when a percentage uses a user-provided comparison allowance.
+
+## Website reader shape
+
+The script file is a standalone async function expression accepting the provider's nonsecret fields:
+
+```javascript
+(async function (fields) {
+  // Use the real endpoint verified on this provider's own website.
+  const response = await fetch("/verified-usage-endpoint", {
+    credentials: "include",
+    cache: "no-store",
+    signal: AbortSignal.timeout(15000)
+  });
+  if (!response.ok) throw new Error("Sign in to Example, then refresh.");
+  const value = await response.json();
+  return { remaining: value.remaining, allowance: value.allowance };
+})
+```
+
+Replace the example route and fields with a verified contract. Return an explicit allowlist of quota fields, never a complete authentication response, token, email or workspace object. A provider may require a bearer token available to its own webpage; use it only inside that page's request and do not return it to native code.
+
+Remote provider windows have no native-command capability. Native Rust evaluates the bundled reader and receives only its result. Scripts run after load, on explicitly allowed HTTPS hosts. Background refresh cannot open sign-in popups; the user opens an interactive window to handle authentication. Do not add arbitrary URL/script settings or challenge-solving automation.
+
+## Lifecycle and tests
+
+The service serializes refreshes per provider, retains a failed refresh's last successful reading, and reports errors separately. Every save changes a configuration revision and cancels the active fetch. A late result from an earlier configuration is discarded. Disabling stops work and closes provider windows. Forget cancels reads, clears this app's session and advances its profile generation so the old cookies cannot be reused.
+
+Use fictional payload fixtures for consumption-to-remaining conversion, multiple windows, missing limits, exhausted quotas, unexpected login pages and changed response shapes. Test the actual JavaScript reader with mocked fetch. Keep pure parser tests on the concrete provider type: constructing the whole dynamic registry drags Windows UI imports into a Rust test executable that lacks the application's UI manifest.
+
+Run the commands in the README. Then verify sign-in, refresh, session persistence and Forget with an authorized real test account. Public-site contract research and fixtures alone do not prove that a site's sign-in flow accepts WebView2. Record that limitation until a real session has been exercised.

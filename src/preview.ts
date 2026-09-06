@@ -1,0 +1,46 @@
+// Development-only fixture adapter. Vite removes this module from release builds.
+import type { Bootstrap, IUsageAppApi, Page, ProviderDefinition, ProviderReport, Unsubscribe, UsageMeter } from "./types";
+
+const providers: ProviderDefinition[] = [
+  { id: "openai", name: "OpenAI", category: "llm", initials: "OA", color: "#87e4b0", description: "Codex allowances included with your ChatGPT subscription.", helpUrl: "https://chatgpt.com/codex/settings/usage", fields: [{ key: "connection", label: "Connection", kind: "select", help: "Use a separate website session or the existing Codex sign-in.", placeholder: "", options: [{ value: "browser", label: "Sign in to ChatGPT" }, { value: "codex", label: "Use signed-in Codex" }] }] },
+  { id: "anthropic", name: "Anthropic", category: "llm", initials: "An", color: "#dba185", description: "Claude subscription allowances.", helpUrl: "https://claude.ai/settings/usage", fields: [] },
+  { id: "ollama", name: "Ollama Cloud", category: "llm", initials: "Ol", color: "#d2d8e0", description: "Cloud usage from Ollama settings.", helpUrl: "https://ollama.com/settings", fields: [] },
+  { id: "suno", name: "Suno", category: "music", initials: "Su", color: "#edb276", description: "Your monthly and total credits.", helpUrl: "https://suno.com/account", fields: [{ key: "allowance", label: "Total-credit reference allowance", kind: "number", help: "Only used if the provider has no total allowance.", placeholder: "Optional", options: [] }] },
+  { id: "higgsfield", name: "Higgsfield", category: "media", initials: "Hi", color: "#b8a3ef", description: "Your subscription wallet.", helpUrl: "https://higgsfield.ai/me/settings/subscription", fields: [] },
+];
+
+function sample(label: string, percentLeft: number, hours: number, remaining: number | null = null, limit: number | null = null, unit = "%"): UsageMeter {
+  return { label, percentLeft, remaining, limit, unit, resetsAt: Math.floor(Date.now() / 1000) + hours * 3600, note: null };
+}
+function fixture(): Bootstrap {
+  const empty = new URLSearchParams(location.search).has("empty");
+  const reports: ProviderReport[] = providers.map((provider, index) => ({
+    providerId: provider.id, updatedAt: Math.floor(Date.now() / 1000) - 30, attemptedAt: Math.floor(Date.now() / 1000) - 30, refreshing: false, error: null,
+    snapshot: { plan: ["Pro", "Max", "Pro", "Pro", "Ultimate"][index] ?? null, note: null, meters: [
+      [sample("5-hour allowance", 74, 3), sample("Weekly allowance", 42, 58)],
+      [sample("5-hour allowance", 91, 4), sample("Weekly allowance", 18, 94)],
+      [sample("Monthly usage", 62, 270, 62, 100, "USD")],
+      [sample("Monthly credits", 68, 155, 1700, 2500, "credits")],
+      [sample("Subscription credits", 36, 188, 1080, 3000, "credits")],
+    ][index] ?? [] },
+  }));
+  return { providers, settings: { version: 1, refreshMinutes: 5, providers: empty ? {} : Object.fromEntries(providers.map(provider => [provider.id, { enabled: true, fields: {}, sessionGeneration: 0, revision: 0 }])) }, reports: empty ? [] : reports, startupError: null };
+}
+export class PreviewApi implements IUsageAppApi {
+  private data = fixture();
+  private usage?: (reports: ProviderReport[]) => void;
+  private changed?: () => void;
+  private autostart = false;
+  async bootstrap(): Promise<Bootstrap> { return structuredClone(this.data); }
+  async currentPage(): Promise<Page> { return location.hash === "#settings" ? "settings" : "usage"; }
+  async refresh(): Promise<void> { this.usage?.(structuredClone(this.data.reports)); }
+  async saveProvider(id: string, enabled: boolean, fields: Record<string, string>): Promise<void> { this.data.settings.providers[id] = { enabled, fields, sessionGeneration: 0, revision: 0 }; this.changed?.(); }
+  async connect(): Promise<string> { throw new Error("Sign-in is available in the desktop app. This is a browser preview."); }
+  async forget(id: string): Promise<void> { delete this.data.settings.providers[id]; this.data.reports = this.data.reports.filter(report => report.providerId !== id); this.changed?.(); }
+  async savePreferences(refreshMinutes: number): Promise<void> { this.data.settings.refreshMinutes = refreshMinutes; }
+  async getAutostart(): Promise<boolean> { return this.autostart; }
+  async setAutostart(enabled: boolean): Promise<void> { this.autostart = enabled; }
+  async onUsage(callback: (reports: ProviderReport[]) => void): Promise<Unsubscribe> { this.usage = callback; return () => { this.usage = undefined; }; }
+  async onSettings(callback: () => void): Promise<Unsubscribe> { this.changed = callback; return () => { this.changed = undefined; }; }
+  async onPage(): Promise<Unsubscribe> { return () => {}; }
+}

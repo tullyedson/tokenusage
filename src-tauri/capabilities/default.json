@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "Only the local usage window may call app commands and receive updates.",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:allow-listen", "core:event:allow-unlisten",
+    "allow-bootstrap", "allow-current-page", "allow-refresh-usage",
+    "allow-save-provider", "allow-sign-in", "allow-forget-provider",
+    "allow-save-preferences", "allow-autostart-enabled", "allow-set-autostart"
+  ]
+}

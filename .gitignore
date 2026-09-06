@@ -1,0 +1,29 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+artifacts/
+*.log
+.env*
+reference/
+
+# Runtime account data and credentials must never enter source control.
+sessions/
+**/EBWebView/
+auth.json
+settings.json
+Cookies
+Login Data
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Generated mobile icons are not used by this Windows application.
+src-tauri/icons/android/
+src-tauri/icons/ios/

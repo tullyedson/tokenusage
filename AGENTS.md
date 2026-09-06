@@ -17,3 +17,7 @@ Read `README.md` and `docs/ADDING_PROVIDERS.md` before extending the app.
 - Fixture tests are not live account verification. Record which real sign-ins were exercised. Never control the user's desktop while they have taken it back for other work.
 
 The app's account data lives outside the source tree. Never copy browser profiles, Codex authentication files or credentials into source, test fixtures or release archives.
+
+## Contribution policy
+
+Main is protected. Make changes on a branch and submit a pull request. External contributions remain pending until the repository owner explicitly chooses to merge them. Never enable automatic merging, merge a contribution or bypass branch protections without the owner's explicit approval for that action. See CONTRIBUTING.md.

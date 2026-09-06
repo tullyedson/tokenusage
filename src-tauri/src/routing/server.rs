@@ -172,7 +172,20 @@ async fn chat(
     if !authorized(&state, &headers) {
         return error(StatusCode::UNAUTHORIZED, "unauthorized", "A valid local client key and loopback Host are required. Browser origins are not accepted.");
     }
-    state.engine.route(body).await
+    let session = headers
+        .get("x-ai-usage-session")
+        .or_else(|| headers.get("x-opencode-session"));
+    match session {
+        None => state.engine.route(body).await,
+        Some(value) => match value.to_str() {
+            Ok(value) => state.engine.route_with_session(body, Some(value)).await,
+            Err(_) => error(
+                StatusCode::BAD_REQUEST,
+                "invalid_session",
+                "Invalid session header.",
+            ),
+        },
+    }
 }
 
 #[cfg(test)]

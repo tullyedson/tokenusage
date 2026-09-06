@@ -25,12 +25,15 @@ pub struct InferenceContext<'a> {
     pub config: &'a ProviderConfig,
     pub secrets: &'a dyn ISecretStore,
     pub client: &'a reqwest::Client,
+    pub now: i64,
+    pub session_id: Option<&'a str>,
 }
 
 pub struct PreparedRequest {
     pub url: reqwest::Url,
     pub body: Value,
     pub key: Option<Zeroizing<String>>,
+    pub headers: reqwest::header::HeaderMap,
 }
 
 #[derive(Clone, Debug)]
@@ -156,9 +159,42 @@ impl RouterEngine {
     }
 
     pub async fn route(self: &Arc<Self>, request: Value) -> Response {
+        self.route_with_session(request, None).await
+    }
+
+    pub async fn route_with_session(
+        self: &Arc<Self>,
+        request: Value,
+        session: Option<&str>,
+    ) -> Response {
         let requested = match validate_request(&request) {
             Ok(model) => model.to_owned(),
             Err(message) => return error(StatusCode::BAD_REQUEST, "invalid_request", message),
+        };
+        let session = match session {
+            Some(value) if valid_session(value) => value.to_owned(),
+            Some(_) => return error(
+                StatusCode::BAD_REQUEST,
+                "invalid_session",
+                "Use an opaque session ID of at most 200 letters, numbers, underscores or hyphens.",
+            ),
+            None => {
+                let mut bytes = [0u8; 16];
+                if getrandom::fill(&mut bytes).is_err() {
+                    return error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "session_unavailable",
+                        "Could not create a request session.",
+                    );
+                }
+                format!(
+                    "ai-usage-{}",
+                    bytes
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect::<String>()
+                )
+            }
         };
         let config = self.config.read().await.clone();
         if !config.settings.enabled {
@@ -240,6 +276,8 @@ impl RouterEngine {
                     config: &account.config,
                     secrets: self.secrets.as_ref(),
                     client: &self.client,
+                    now,
+                    session_id: Some(&session),
                 };
                 let prepared = tokio::select! {
                     biased;
@@ -428,12 +466,23 @@ pub fn validate_request(request: &Value) -> Result<&str, &'static str> {
     Ok(model)
 }
 
+pub fn valid_session(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 200
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
+}
+
 async fn send(
     client: &reqwest::Client,
     prepared: PreparedRequest,
     now: i64,
 ) -> Result<reqwest::Response, RouteFailure> {
-    let mut request = client.post(prepared.url).json(&prepared.body);
+    let mut request = client
+        .post(prepared.url)
+        .headers(prepared.headers)
+        .json(&prepared.body);
     if let Some(key) = prepared.key {
         let mut header = HeaderValue::from_str(&format!("Bearer {}", key.as_str()))
             .map_err(|_| RouteFailure::Invalid("The saved key is invalid."))?;

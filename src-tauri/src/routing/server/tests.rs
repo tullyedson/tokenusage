@@ -143,6 +143,7 @@ impl IInferenceProvider for Adapter {
         let mut body = request.clone();
         body["model"] = json!(upstream);
         Ok(PreparedRequest {
+            headers: Default::default(),
             url: format!("{}/{}/chat", self.base, ctx.account_id)
                 .parse()
                 .unwrap(),

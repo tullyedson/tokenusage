@@ -249,6 +249,7 @@ impl IInferenceProvider for HttpProvider {
             body["provider"] = json!({"max_price":{"prompt":0,"completion":0,"request":0,"image":0},"allow_fallbacks":false});
         }
         Ok(PreparedRequest {
+            headers: Default::default(),
             url: self
                 .base(ctx.config)
                 .map_err(|_| RouteFailure::Invalid("Invalid server URL."))?

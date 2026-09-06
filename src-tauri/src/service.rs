@@ -323,6 +323,8 @@ impl UsageService {
             config: &config,
             secrets: self.secrets.as_ref(),
             client: &self.router.engine.client,
+            now: chrono::Utc::now().timestamp(),
+            session_id: None,
         };
         let result = tokio::select! { result = adapter.models(&context) => result?, _ = cancelled.cancelled() => return Err("The account changed. List models again.".into()) };
         if cancelled.is_cancelled() || self.settings.lock().await.providers.get(id) != Some(&config)

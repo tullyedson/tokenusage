@@ -2,13 +2,17 @@
 
 ## Automated checks
 
+Version 0.4.0 subscription-routing checks on 2026-09-06: 41 Rust tests and 21 frontend tests pass, including strict Clippy and production TypeScript/Vite compilation. Five new native tests exercise all three Go quota windows, failover to the same GLM model on Ollama Cloud, restoration of Go priority after a fresh post-reset read, quota races at submission, both accounts exhausted, separate account keys, stream/tool-call preservation and no generation for unknown usage, missing models or unconfirmed billing. A client-plugin test verifies stable session IDs and preservation of other providers' headers. These fixtures use the actual subscription adapters with local HTTP servers; they do not exhaust real accounts.
+
+Read-only live checks confirmed that the existing Go and Ollama keys authenticate, both catalogs include `glm-5.3-flash`, Go returns all three current usage windows, and Ollama exposes its OpenAI-compatible model endpoint. These checks did not send a generation request, verify provider billing switches, or prove live failover. Subscription routing must remain disabled until the account owner confirms the no-overage prerequisites documented in README.md.
+
 Version 0.3.2 Spark-meter checks on 2026-09-06: 36 Rust tests and 20 frontend tests pass, with strict Clippy and production TypeScript/Vite compilation. Two new parser regressions reproduced three meters before the change and pass with only the normal weekly allowance afterward. Both signed-in Codex and website payloads are covered, including identification by the provider's Spark bucket ID or display name, with the regular percentage, reset and plan preserved. The optional signed-in Codex integration test also passes against the installed account without printing account data. The OpenAI website path remains fixture-tested.
 
 Version 0.3.1 reset-time checks on 2026-09-06: 34 Rust tests and 20 frontend tests pass, with strict Clippy and production TypeScript/Vite compilation. Two new website-reader fixtures failed before the fix and pass afterward. They cover reset elements below separate usage headers/bars, monthly dollar balances, independent session/weekly dates, and a missing hourly timestamp that must not borrow the weekly reset. Two native parser tests confirm UTC-offset conversion, serialized reset timestamps, and preservation of valid usage when a reset is missing or invalid. The reader now continues within the same usage window after finding its amount, allowing the existing dashboard to display the reported reset in local time. This change has not been verified against a live Ollama session.
 
 Version 0.3.0 routing checks on 2026-09-06: 32 Rust tests and 18 frontend tests pass, with strict Clippy and production TypeScript/Vite compilation. New tests exercise the actual loopback listener and HTTP transport with fictional upstream servers: ordered account failover on 429, reset recovery with an injected clock, exact-model precedence over substitutions, stopping on unavailable routes, separate account keys, JSON/SSE forwarding, non-replay after terminal errors, key rotation, Host/Origin checks, listener shutdown, real vLLM/Ollama adapter code, cloud-alias rejection, and cancellation while the caller stops reading a stream. Migration preserves version 1 account IDs and browser generations. The headless HTML app test adds a second account, discovers and maps a model, reorders accounts and saves fallback rules through mocked native commands.
 
-These are fixture and headless DOM tests. This routing build has not been installed or exercised against a live model account or the user's running model servers. No real inference requests were sent. OpenAI, Anthropic, OpenCode Go, Ollama Cloud, Suno and Higgsfield remain usage-only in this build; see ROUTING.html for the compatibility limits and no-paid policy.
+The 0.3.0 checks above were fixture and headless DOM tests, with no real inference requests during that build. OpenAI, Anthropic, OpenCode Go, Ollama Cloud, Suno and Higgsfield were usage-only in 0.3.0. The 0.4.0 subscription support and its separate verification scope are recorded at the top of this file.
 
 The following checks describe the preceding 0.2.0 usage-reader release:
 
@@ -26,11 +30,17 @@ After the project folder moved, cached Tauri permission manifests still referenc
 
 ## Desktop observations
 
+The version 0.4.0 NSIS installer was applied in silent update mode with no open router connections. The installed executable matches the verified installer payload, settings were byte-identical across the upgrade, and the Windows startup preference was preserved. The app restarted hidden. A subsequent scoped setup saved GLM mappings for Go and Ollama Cloud, with Go first, while leaving both subscription routes disabled pending billing confirmation. The existing Go key matches the OpenCode Go connection, and the existing Ollama key was saved in Windows Credential Manager. No secret values were printed or written to project configuration.
+
+Harborlight's OpenCode project configuration now lists `ai-usage/glm-5.3-flash` and retains its prior Qwen route. The session plugin is installed. `opencode models ai-usage` successfully lists both choices. OpenCode's existing client key still authenticates to the live router, whose active catalog retains the original local route. Harborlight's tracked source diff and the OpenCode auth file were unchanged by setup. The cloud model is prepared in the client but cannot route until its billing prerequisites are confirmed and its account routing toggles enabled. No cloud inference requests were sent, and no desktop controls were used.
+
 The version 0.3.2 NSIS installer was applied in silent update mode while the router had no open client connections. The installed executable matches the verified installer payload, settings remain byte-identical, and the Windows startup preference is unchanged. The app restarted hidden in the tray. OpenCode's existing client key successfully read the router model catalog and its previous local model route remained available. No desktop interaction or screenshot verification was performed for this update.
 
 The native app opened successfully, and the dashboard layout was inspected. Desktop control stopped when the user took back the PC. Subsequent work uses background commands only.
 
 ## Packaged release
+
+The version 0.4.0 Windows x64 NSIS installer passed archive integrity and product-version checks on 2026-09-06. The seven-file payload contains the application and standard installer helpers. A complete byte comparison matched the optimized executable apart from Tauri's three-byte UNK-to-NSS bundle marker. The installed executable exactly matches that payload.
 
 The version 0.3.2 Windows x64 NSIS installer passed archive integrity and product-version checks on 2026-09-06. The packaged executable differs from the optimized build only in Tauri's three-byte UNK-to-NSS bundle marker; a complete byte comparison verified no other differences. The silent installed executable exactly matches that packaged payload.
 

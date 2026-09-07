@@ -5,7 +5,7 @@ use crate::{
     persistence, provider_settings,
     providers::{self, ConnectionOutcome, FetchContext, IUsageProvider},
     routing::{
-        config::{self, AccountRouting, RouterSettings},
+        config::{self, AccountRouting, ModelPool, RouterSettings},
         engine::{InferenceContext, InferenceDefinition, RouteAccount},
         RouterRuntime, RouterStatus,
     },
@@ -79,14 +79,8 @@ impl UsageService {
         let accounts = settings
             .providers
             .iter()
-            .filter(|(_, c)| c.enabled && c.routing.enabled)
             .filter_map(|(id, config)| {
                 let provider = self.provider(config.provider_type(id)).ok()?.inference()?;
-                if config::validate_account(&config.routing).is_err()
-                    || provider.validate(config).is_err()
-                {
-                    return None;
-                }
                 Some(RouteAccount {
                     id: id.clone(),
                     config: config.clone(),
@@ -205,7 +199,6 @@ impl UsageService {
                 ..Default::default()
             },
         );
-        next.routing.account_order.push(id.clone());
         persistence::save(&self.path, &next)?;
         *settings = next;
         self.sync_router(&settings).await;
@@ -226,12 +219,11 @@ impl UsageService {
         if !config::valid_account(id) || label.len() > 100 || label.chars().any(char::is_control) {
             return Err("Use a short account label without control characters.".into());
         }
-        config::validate_account(&routing)?;
         let mut settings = self.settings.lock().await;
         let old = settings.providers.get(id).cloned().unwrap_or_default();
         let provider = self.provider(old.provider_type(id))?;
         let changes = provider_settings::validate(&provider.definition(), &fields, secrets)?;
-        let updated = ProviderConfig {
+        let mut updated = ProviderConfig {
             enabled,
             label,
             fields,
@@ -241,16 +233,11 @@ impl UsageService {
         };
         if let Some(inference) = provider.inference() {
             inference.validate(&updated)?;
-        } else if updated.routing.enabled {
-            return Err(
-                "This provider has no supported included-only routing connection yet.".into(),
-            );
+        } else {
+            updated.routing.enabled = false;
         }
         let mut next = settings.clone();
         next.providers.insert(id.into(), updated);
-        if !next.routing.account_order.contains(&id.to_string()) {
-            next.routing.account_order.push(id.into());
-        }
         self.cancel(id);
         self.router.engine.cancel_requests().await;
         if let Err(error) = credentials::update_with(self.secrets.as_ref(), id, &changes, || {
@@ -272,12 +259,13 @@ impl UsageService {
     }
     pub async fn save_routing(
         &self,
-        routing: RouterSettings,
+        mut routing: RouterSettings,
         client_token: String,
     ) -> Result<(), String> {
         let client_token = zeroize::Zeroizing::new(client_token);
         self.writable()?;
         let mut settings = self.settings.lock().await;
+        routing.pools = settings.routing.pools.clone();
         config::validate(&routing, &settings.providers.keys().cloned().collect())?;
         if !client_token.is_empty() && !crate::routing::server_token_valid(&client_token) {
             return Err("Client keys need 32 to 256 letters, numbers, underscores or hyphens. Use Generate key.".into());
@@ -309,6 +297,18 @@ impl UsageService {
         let _ = self.app.emit("settings-changed", ());
         Ok(())
     }
+    pub async fn save_model_pools(&self, pools: Vec<ModelPool>) -> Result<(), String> {
+        self.writable()?;
+        let mut settings = self.settings.lock().await;
+        config::validate_pools(&pools, &settings.providers.keys().cloned().collect())?;
+        let mut next = settings.clone();
+        next.routing.pools = pools;
+        persistence::save(&self.path, &next)?;
+        *settings = next;
+        self.sync_router(&settings).await;
+        let _ = self.app.emit("settings-changed", ());
+        Ok(())
+    }
     pub async fn discover_models(&self, id: &str) -> Result<Vec<String>, String> {
         let (provider, config) = self.account(id).await?;
         let cancelled = self.router.engine.cancellation().await;
@@ -323,6 +323,8 @@ impl UsageService {
             config: &config,
             secrets: self.secrets.as_ref(),
             client: &self.router.engine.client,
+            now: chrono::Utc::now().timestamp(),
+            session_id: None,
         };
         let result = tokio::select! { result = adapter.models(&context) => result?, _ = cancelled.cancelled() => return Err("The account changed. List models again.".into()) };
         if cancelled.is_cancelled() || self.settings.lock().await.providers.get(id) != Some(&config)

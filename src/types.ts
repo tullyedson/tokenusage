@@ -1,10 +1,14 @@
-export type Page = "usage" | "settings" | "routing";
+export type Page = "usage" | "settings" | "routing" | "models";
 export type Category = "llm" | "music" | "speech" | "media";
 export type SettingField = { key: string; label: string; kind: string; help: string; placeholder: string; options: { value: string; label: string }[] };
 export type ProviderDefinition = { id: string; name: string; category: Category; initials: string; color: string; description: string; helpUrl: string; fields: SettingField[] };
-export type ModelMapping = { model: string; upstream: string };
-export type AccountRouting = { enabled: boolean; models: ModelMapping[] };
-export type RouterSettings = { enabled: boolean; port: number; accountOrder: string[]; fallbacks: { model: string; alternatives: string[] }[] };
+export type AccountRouting = { enabled: boolean };
+export type PoolMember = { accountId: string; model: string };
+export type ModelPool = { name: string; members: PoolMember[] };
+export type AvailablePool = ModelPool & { automatic: boolean; available: boolean };
+export type ModelCatalog = { accountId: string; models: string[]; checkedAt: number | null; error: string | null };
+export type ModelLibrary = { catalogs: ModelCatalog[]; pools: AvailablePool[] };
+export type RouterSettings = { enabled: boolean; port: number; pools: ModelPool[] };
 export type ProviderConfig = { providerType: string; label: string; routing: AccountRouting; enabled: boolean; fields: Record<string, string>; sessionGeneration: number; revision: number };
 export type Settings = { version: number; refreshMinutes: number; providers: Record<string, ProviderConfig>; routing: RouterSettings };
 export type UsageMeter = { label: string; remaining: number | null; limit: number | null; percentLeft: number | null; unit: string; resetsAt: number | null; note: string | null };
@@ -21,6 +25,8 @@ export interface IUsageAppApi {
   addAccount(providerType: string): Promise<string>;
   saveRouting(routing: RouterSettings, clientToken: string): Promise<void>;
   discoverModels(providerId: string): Promise<string[]>;
+  modelLibrary(force?: boolean): Promise<ModelLibrary>;
+  saveModelPools(pools: ModelPool[]): Promise<void>;
   connect(providerId: string): Promise<string>;
   forget(providerId: string): Promise<void>;
   savePreferences(refreshMinutes: number): Promise<void>;

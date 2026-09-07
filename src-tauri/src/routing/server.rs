@@ -162,7 +162,14 @@ async fn models(State(state): State<HttpState>, headers: HeaderMap) -> Response 
     if !authorized(&state, &headers) {
         return error(StatusCode::UNAUTHORIZED, "unauthorized", "A valid local client key and loopback Host are required. Browser origins are not accepted.");
     }
-    Json(state.engine.model_list().await).into_response()
+    match state.engine.model_list().await {
+        Ok(models) => Json(models).into_response(),
+        Err(_) => error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "configuration_changed",
+            "Settings changed while discovering models. Retry the model list.",
+        ),
+    }
 }
 async fn chat(
     State(state): State<HttpState>,
@@ -172,7 +179,20 @@ async fn chat(
     if !authorized(&state, &headers) {
         return error(StatusCode::UNAUTHORIZED, "unauthorized", "A valid local client key and loopback Host are required. Browser origins are not accepted.");
     }
-    state.engine.route(body).await
+    let session = headers
+        .get("x-ai-usage-session")
+        .or_else(|| headers.get("x-opencode-session"));
+    match session {
+        None => state.engine.route(body).await,
+        Some(value) => match value.to_str() {
+            Ok(value) => state.engine.route_with_session(body, Some(value)).await,
+            Err(_) => error(
+                StatusCode::BAD_REQUEST,
+                "invalid_session",
+                "Invalid session header.",
+            ),
+        },
+    }
 }
 
 #[cfg(test)]

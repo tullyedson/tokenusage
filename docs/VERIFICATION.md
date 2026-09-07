@@ -1,6 +1,24 @@
 # Verification record
 
+## Version 0.5.1 model pools
+
+On September 6, 2026, 46 Rust tests and 25 frontend tests passed, with strict Clippy, production TypeScript/Vite compilation and NSIS packaging. Pool tests cover exact order across different models/providers, return after reset, automatic catalogs, cache expiry and stale/error handling, disabled accounts, custom overrides, version 1/2 migration, UTF-8 SSE chunk boundaries, tool-call preservation and stable response model names. Existing no-paid-request, local-model verification, credential isolation, cancellation and no-replay regressions pass.
+
+DOM integration tests exercise creation with spaces converted to hyphens, drag-and-drop and arrow ordering, mixed providers, duplicate prevention, draft preservation across navigation/refresh, failed saves, resetting to automatic groups, and connection saves preserving pools. OpenCode plugin tests cover automatic name import, explicit limit preservation, offline behavior, loopback-only authentication and stable session headers. The Models page was rendered in an isolated headless browser at 980 pixels wide, including a populated three-entry pool; its controls and layout were inspected without controlling the user's desktop.
+
+The account owner completed the provider billing setup and enabled Go and Ollama Cloud before this update. Version 0.5.0 defaults to plan-only routing without a confirmation dropdown. The app cannot inspect or change the provider-side overage switches, and supported Ollama billing remains the legacy capped plan without extra credits. Live quota exhaustion/reset recovery is simulated in fixtures, not by consuming real allowances.
+
+Version 0.5.1 explicitly disables Tauri's native file-drop interception on the main window, which is required for HTML5 drag-and-drop on Windows. The pool integration test guards this host setting as well as the DOM behavior. All checks and NSIS packaging above were rerun for 0.5.1. Native pointer interactions were not exercised while the owner used the desktop.
+
+After the owner's restart approval, the 0.5.0 and final 0.5.1 installers were applied silently and the app restarted hidden. Both upgrades preserved settings byte-for-byte and the Windows startup preference. The running 0.5.1 executable matches the extracted installer payload exactly, with one tray process. Its authenticated router catalog and Harborlight's OpenCode 1.18.29 each expose 46 models, including GLM and the existing local Qwen route. The OpenCode plugin matches the distributed example, and its project configuration and authentication file remain unchanged.
+
+Neutral live requests through the same routing engine in 0.5.0 succeeded for Go GLM and Ollama Cloud DeepSeek. A local Qwen streaming request returned a valid tool call across 27 events and a terminal marker, without executing a tool. These requests preserved the requested model name. Real account depletion and reset were not induced; those transitions remain fixture-tested. The final Windows-only patch was followed by fresh catalog/client checks without repeating cloud generation. Existing settings version 2 is migrated in memory; the next successful settings save persists version 3.
+
 ## Automated checks
+
+Version 0.4.0 subscription-routing checks on 2026-09-06: 41 Rust tests and 21 frontend tests pass, including strict Clippy and production TypeScript/Vite compilation. Five new native tests exercise all three Go quota windows, failover to the same GLM model on Ollama Cloud, restoration of Go priority after a fresh post-reset read, quota races at submission, both accounts exhausted, separate account keys, stream/tool-call preservation and no generation for unknown usage, missing models or unconfirmed billing. A client-plugin test verifies stable session IDs and preservation of other providers' headers. These fixtures use the actual subscription adapters with local HTTP servers; they do not exhaust real accounts.
+
+Read-only live checks confirmed that the existing Go and Ollama keys authenticate, both catalogs include `glm-5.3-flash`, Go returns all three current usage windows, and Ollama exposes its OpenAI-compatible model endpoint. These checks did not send a generation request, verify provider billing switches, or prove live failover. At that build, routing was left disabled pending owner setup. The owner subsequently completed it before the 0.5.0 work recorded above.
 
 Version 0.3.2 Spark-meter checks on 2026-09-06: 36 Rust tests and 20 frontend tests pass, with strict Clippy and production TypeScript/Vite compilation. Two new parser regressions reproduced three meters before the change and pass with only the normal weekly allowance afterward. Both signed-in Codex and website payloads are covered, including identification by the provider's Spark bucket ID or display name, with the regular percentage, reset and plan preserved. The optional signed-in Codex integration test also passes against the installed account without printing account data. The OpenAI website path remains fixture-tested.
 
@@ -8,7 +26,7 @@ Version 0.3.1 reset-time checks on 2026-09-06: 34 Rust tests and 20 frontend tes
 
 Version 0.3.0 routing checks on 2026-09-06: 32 Rust tests and 18 frontend tests pass, with strict Clippy and production TypeScript/Vite compilation. New tests exercise the actual loopback listener and HTTP transport with fictional upstream servers: ordered account failover on 429, reset recovery with an injected clock, exact-model precedence over substitutions, stopping on unavailable routes, separate account keys, JSON/SSE forwarding, non-replay after terminal errors, key rotation, Host/Origin checks, listener shutdown, real vLLM/Ollama adapter code, cloud-alias rejection, and cancellation while the caller stops reading a stream. Migration preserves version 1 account IDs and browser generations. The headless HTML app test adds a second account, discovers and maps a model, reorders accounts and saves fallback rules through mocked native commands.
 
-These are fixture and headless DOM tests. This routing build has not been installed or exercised against a live model account or the user's running model servers. No real inference requests were sent. OpenAI, Anthropic, OpenCode Go, Ollama Cloud, Suno and Higgsfield remain usage-only in this build; see ROUTING.html for the compatibility limits and no-paid policy.
+The 0.3.0 checks above were fixture and headless DOM tests, with no real inference requests during that build. OpenAI, Anthropic, OpenCode Go, Ollama Cloud, Suno and Higgsfield were usage-only in 0.3.0. The 0.4.0 subscription support and its separate verification scope are recorded at the top of this file.
 
 The following checks describe the preceding 0.2.0 usage-reader release:
 
@@ -26,11 +44,19 @@ After the project folder moved, cached Tauri permission manifests still referenc
 
 ## Desktop observations
 
+The version 0.4.0 NSIS installer was applied in silent update mode with no open router connections. The installed executable matches the verified installer payload, settings were byte-identical across the upgrade, and the Windows startup preference was preserved. The app restarted hidden. A subsequent scoped setup saved GLM mappings for Go and Ollama Cloud, with Go first, while leaving both subscription routes disabled pending billing confirmation. The existing Go key matches the OpenCode Go connection, and the existing Ollama key was saved in Windows Credential Manager. No secret values were printed or written to project configuration.
+
+Harborlight's OpenCode project configuration now lists `ai-usage/glm-5.3-flash` and retains its prior Qwen route. The session plugin is installed. `opencode models ai-usage` successfully lists both choices. OpenCode's existing client key still authenticates to the live router, whose active catalog retains the original local route. Harborlight's tracked source diff and the OpenCode auth file were unchanged by setup. The cloud model is prepared in the client but cannot route until its billing prerequisites are confirmed and its account routing toggles enabled. No cloud inference requests were sent, and no desktop controls were used.
+
 The version 0.3.2 NSIS installer was applied in silent update mode while the router had no open client connections. The installed executable matches the verified installer payload, settings remain byte-identical, and the Windows startup preference is unchanged. The app restarted hidden in the tray. OpenCode's existing client key successfully read the router model catalog and its previous local model route remained available. No desktop interaction or screenshot verification was performed for this update.
 
 The native app opened successfully, and the dashboard layout was inspected. Desktop control stopped when the user took back the PC. Subsequent work uses background commands only.
 
 ## Packaged release
+
+The version 0.5.1 Windows x64 NSIS installer passed archive integrity and product-version checks. Full executable comparison found only Tauri's three-byte UNK-to-NSS bundle marker; the installed executable matches the extracted payload exactly. The package contains the application and standard NSIS helper assets. Account data remains outside the source and release archives. The installer is unsigned.
+
+The version 0.4.0 Windows x64 NSIS installer passed archive integrity and product-version checks on 2026-09-06. The seven-file payload contains the application and standard installer helpers. A complete byte comparison matched the optimized executable apart from Tauri's three-byte UNK-to-NSS bundle marker. The installed executable exactly matches that payload.
 
 The version 0.3.2 Windows x64 NSIS installer passed archive integrity and product-version checks on 2026-09-06. The packaged executable differs from the optimized build only in Tauri's three-byte UNK-to-NSS bundle marker; a complete byte comparison verified no other differences. The silent installed executable exactly matches that packaged payload.
 
@@ -51,8 +77,8 @@ These require the user's account sign-ins or an uninterrupted desktop session:
 - Claude, Higgsfield, Suno and Ollama sign-in, live balances, session persistence and expired-session recovery.
 - OpenAI website sign-in, if that connection is used instead of installed Codex.
 - OpenRouter management-key account credits and standard-key allowances against a real account, including key replacement and Forget in the installed app.
-- OpenCode Go key authentication and live allowance values for a subscribed workspace. Zen wallet balances are outside the current OpenCode connection.
+- OpenCode Go website session persistence and expired-session recovery. Native key authentication, all three allowance windows and included-plan generation were exercised as recorded above. Zen wallet balances are outside the current OpenCode connection.
 - Installer UI, uninstall UI and optional Windows startup after an actual install.
-- Version 0.3 routing UI in the native window, live local model generation, OpenRouter free-model generation, caller streaming/disconnect behavior, and installed router startup/shutdown. All current routing verification uses fictional local HTTP fixtures and the headless HTML test.
+- Pool drag/drop in the native window, OpenRouter free-model generation, local Ollama generation and real caller disconnect behavior. Local vLLM generation, streaming tool calls, silent installation, router restart and OpenCode model import passed as recorded above. Quota exhaustion/reset and disconnect/cancellation paths use local HTTP fixtures.
 
-Creating an installer does not install it or change Windows startup settings. The separate 0.3.2 silent upgrade and its verified scope are recorded above; interactive installation and uninstall UI remain user-controlled checks.
+Building an installer alone does not install it or change Windows startup settings. The separate silent upgrades and their verified scope are recorded above; interactive installation and uninstall UI remain user-controlled checks.

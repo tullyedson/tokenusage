@@ -60,6 +60,8 @@ impl IUsageProvider for LocalModels {
             config,
             secrets: context.secrets.as_ref(),
             client: &client,
+            now: chrono::Utc::now().timestamp(),
+            session_id: None,
         };
         let names = tokio::select! {
             result = self.0.models(&inference_context) => result?,

@@ -137,20 +137,11 @@ impl IInferenceProvider for HttpProvider {
     }
     fn validate(&self, config: &ProviderConfig) -> Result<(), String> {
         self.base(config)?;
-        if matches!(self, Self::OpenRouterFree) && config.routing.enabled {
-            if config.field("connection") != "key" {
-                return Err(
-                    "Routing needs the standard-key connection, not a management key.".into(),
-                );
-            }
-            if config
-                .routing
-                .models
-                .iter()
-                .any(|m| !m.upstream.ends_with(":free") || m.upstream.starts_with("openrouter/"))
-            {
-                return Err("OpenRouter routing accepts explicit :free model IDs only.".into());
-            }
+        if matches!(self, Self::OpenRouterFree)
+            && config.routing.enabled
+            && config.field("connection") != "key"
+        {
+            return Err("Routing needs the standard-key connection, not a management key.".into());
         }
         Ok(())
     }
@@ -249,6 +240,7 @@ impl IInferenceProvider for HttpProvider {
             body["provider"] = json!({"max_price":{"prompt":0,"completion":0,"request":0,"image":0},"allow_fallbacks":false});
         }
         Ok(PreparedRequest {
+            headers: Default::default(),
             url: self
                 .base(ctx.config)
                 .map_err(|_| RouteFailure::Invalid("Invalid server URL."))?

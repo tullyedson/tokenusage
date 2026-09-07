@@ -87,6 +87,20 @@ async fn save_routing(
     service.save_routing(routing, client_token).await
 }
 #[tauri::command]
+async fn model_library(
+    service: State<'_, Arc<UsageService>>,
+    force: bool,
+) -> Result<routing::catalog::ModelLibrary, String> {
+    service.router.engine.model_library(force).await
+}
+#[tauri::command]
+async fn save_model_pools(
+    service: State<'_, Arc<UsageService>>,
+    pools: Vec<routing::config::ModelPool>,
+) -> Result<(), String> {
+    service.save_model_pools(pools).await
+}
+#[tauri::command]
 async fn discover_models(
     service: State<'_, Arc<UsageService>>,
     provider_id: String,
@@ -149,6 +163,8 @@ pub fn run() {
             save_provider,
             add_account,
             save_routing,
+            model_library,
+            save_model_pools,
             discover_models,
             sign_in,
             forget_provider,

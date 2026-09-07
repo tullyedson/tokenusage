@@ -1,6 +1,11 @@
+pub mod catalog;
 pub mod config;
 pub mod engine;
+mod legacy;
+pub(crate) mod migration;
 pub mod providers;
 mod server;
+mod stream;
+pub mod subscriptions;
 pub use server::valid_token as server_token_valid;
 pub use server::{RouterRuntime, RouterStatus};

@@ -7,6 +7,8 @@ fn main() {
             "save_provider",
             "add_account",
             "save_routing",
+            "model_library",
+            "save_model_pools",
             "discover_models",
             "sign_in",
             "forget_provider",

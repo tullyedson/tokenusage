@@ -1,5 +1,13 @@
 # Verification record
 
+## Version 0.7.1 long chat histories
+
+On September 7, 2026, the installed 0.7.0 router reproduced the reported validation error with 1,001 fictional messages in a 62,146-byte request. A 1,000-message request passed validation. The count limit was present before the load-distribution update and was unrelated to the advertised token/context capacity. The 0.7.1 fix removes that count cap, preserves the 16 MiB HTTP body limit, and distinguishes an empty/non-array history from malformed message objects or roles. It does not trim, summarize or drop messages.
+
+All 74 Rust tests and 35 frontend tests pass, along with strict Clippy, TypeScript/Vite and NSIS packaging. The new HTTP regression failed with status 400 before the fix and passes afterward. It forwards 1,203 messages through the actual local vLLM adapter to a fictional server in both JSON and streaming modes, comparing the entire upstream request after model alias replacement. The history includes 600 tool-call/result pairs, null assistant content, multipart user content and Unicode. Additional cases reject malformed histories, including an invalid message after 1,200 valid ones. Existing authorization, paid-extension rejection and 16 MiB body-limit tests still pass.
+
+The installer passed integrity, version and full executable comparison, with only the expected three-byte Tauri installer marker differing from the optimized build. Version 0.7.1 was installed silently while no router clients were connected. The running executable matches the verified payload. Settings, Windows startup preference, OpenCode project config/plugin and client auth are preserved. The live catalog retains all 48 names, GLM's 1,000,000 context limit and Gemma's load-distribution mode. Fictional requests with 1,000, 1,001 and 2,001 messages now all pass validation and reach the expected unknown-model response, without generating text. The owner's private conversation was not captured, changed or replayed; successful continuation in that conversation requires a client retry.
+
 ## Version 0.7.0 sticky load distribution
 
 On September 7, 2026, 72 Rust tests and 35 frontend tests passed, along with strict Clippy, TypeScript/Vite and the Windows NSIS build. New regressions cover distributed sequential callers, sticky repeated callers, instance IDs taking precedence over sessions, anonymous request rotation, simultaneous streams on three servers, queued cancellation, stream disconnect, configuration replacement, safe preflight fallback, quota failure, and no replay after ambiguous submission. Existing ordered failover and reset recovery still pass. Selecting a later entry for distribution is not itself reported as fallback.

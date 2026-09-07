@@ -709,10 +709,19 @@ pub fn validate_request(request: &Value) -> Result<&str, &'static str> {
         .as_str()
         .filter(|m| super::config::valid_model(m))
         .ok_or("A valid model is required.")?;
-    if !request["messages"].as_array().is_some_and(|m| {
-        !m.is_empty() && m.len() <= 1000 && m.iter().all(|m| m.is_object() && m["role"].is_string())
+    let messages = request["messages"]
+        .as_array()
+        .filter(|messages| !messages.is_empty())
+        .ok_or("messages must be a non-empty array of chat messages.")?;
+    // The HTTP body limit bounds input size. Message count is not a token/context limit;
+    // long tool conversations must retain every message and tool-call/result pair.
+    if messages.iter().any(|message| {
+        !message.is_object()
+            || !message["role"]
+                .as_str()
+                .is_some_and(|role| !role.is_empty())
     }) {
-        return Err("messages must contain 1 to 1000 chat messages.");
+        return Err("Each chat message must be an object with a non-empty string role.");
     }
     if object.contains_key("stream") && !request["stream"].is_boolean() {
         return Err("stream must be true or false.");

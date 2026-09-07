@@ -23,6 +23,7 @@ use zeroize::Zeroizing;
 const CLIENT_KEY: &str = "fictional_local_client_key_for_tests_only_000000";
 mod distribution;
 mod reporting;
+mod validation;
 #[derive(Default)]
 struct MemoryStore(StdMutex<BTreeMap<(String, String), String>>);
 impl ISecretStore for MemoryStore {

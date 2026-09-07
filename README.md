@@ -2,7 +2,7 @@
 
 A Rust and Tauri 2 app for Windows that shows AI account usage in the system tray and provides an optional local model router.
 
-**Version 0.7.0** adds sticky load distribution alongside ordered failover. Each pool has its own route type. Provider context/input/output limits pass through the router and into OpenCode. Each model pool advertises the lowest supported limits across its enabled entries. The Models page shows these limits; Reports shows active destinations and recent fallback history. Create common names such as `flash-models` on Models, drag in models from different providers or local servers, and choose how to route them. Calling apps use that one name while the router follows the pool's selection policy. Plan-only routing is the default for supported accounts.
+**Version 0.7.1** removes the old 1,000-message cap so long OpenCode tool conversations can reach the model. It includes sticky load distribution alongside ordered failover. Each pool has its own route type. Provider context/input/output limits pass through the router and into OpenCode. Each model pool advertises the lowest supported limits across its enabled entries. The Models page shows these limits; Reports shows active destinations and recent fallback history. Create common names such as `flash-models` on Models, drag in models from different providers or local servers, and choose how to route them. Calling apps use that one name while the router follows the pool's selection policy. Plan-only routing is the default for supported accounts.
 
 | Page | What you can do |
 | --- | --- |
@@ -22,7 +22,7 @@ This README describes the checked-out source version. `main` changes only after 
 
 Use Windows x64 and Microsoft Edge WebView2. You do not need Rust or Node.js to run an installer supplied by the maintainer; those are only needed to build the app.
 
-1. Run the **AI Usage 0.7.0 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
+1. Run the **AI Usage 0.7.1 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
 2. Launch **AI Usage** from the Start menu. If you cannot see its tray icon, open Windows' hidden-icons area.
 3. Click or double-click the tray icon to open **Usage**. Right-click it for **Show usage**, **Settings**, or **Exit**.
 4. Use the **Usage**, **Models**, **Reports**, **Routing** and **Settings** tabs in the app window. Closing this window hides it; **Exit** stops the app and its router.
@@ -181,7 +181,7 @@ The supplemental public catalog is read without credentials, cached for five min
 
 For local Ollama, configure the context you intend to run in that model's Modelfile with `PARAMETER num_ctx`, then refresh models. The router does not increase GPU memory allocation or assume a theoretical 1M model runs with 1M context locally. See [Ollama context length](https://docs.ollama.com/context-length) and [Modelfile parameters](https://docs.ollama.com/modelfile#parameter).
 
-The proxy accepts JSON requests up to **16 MiB**, including tools and message history. This replaces the old 1 MiB cap so normal long-context requests can reach the provider. Token limits and this byte limit are separate. The provider performs token counting and enforces its actual capacity; the proxy does not truncate prompts or estimate tokens from character counts.
+The proxy accepts JSON requests up to **16 MiB**, including tools and message history. This replaces the old 1 MiB cap so normal long-context requests can reach the provider. There is no separate message-count cap. Token limits and this byte limit are separate. The provider performs token counting and enforces its actual capacity; the proxy does not truncate prompts or estimate tokens from character counts.
 
 ### 3. How fallback works
 
@@ -311,6 +311,8 @@ Native app commands are restricted to the local main window. Remote sign-in page
 | Router **Stopped** or connection refused | Start AI Usage, save a client key, enable the router and save. If the port is busy, choose another port and update the calling app's base URL. |
 | HTTP 401 | Use the AI Usage client key, not a provider key. Check that a new key was saved. Use the displayed loopback URL and a native/backend client without a browser Origin header. |
 | HTTP 400 | Check the model name, JSON body and supported fields. Use Chat Completions rather than Responses/Messages. Provider routing overrides and unsupported paid extensions are rejected. |
+| **messages must contain 1 to 1000 chat messages** | Upgrade AI Usage to 0.7.1 or later and retry the same conversation. Older routers rejected histories above 1,000 messages even when within context. The router does not delete, summarize or truncate history. |
+| HTTP 413 | The complete JSON request exceeds the separate 16 MiB transport limit. This is a byte limit, not a token or message count. |
 | HTTP 404 / model not found | Refresh models in AI Usage, check the exact case-sensitive name, and restart OpenCode to import new names. |
 | HTTP 429 | Read the error's `attempts` and `retry_at` fields when present. No configured route may be eligible, an upstream may be rate-limited, or all eight request slots may be busy. Check both account toggles and pool entries, then wait for retry/reset or add an eligible model to the pool. |
 | HTTP 502 / 504 | Check the selected server's availability and supported chat parameters. A request that may already have been submitted is not automatically replayed. |
@@ -332,7 +334,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 
 The build script prepares a local test-temp directory, runs frontend tests, Rust tests and Clippy, then builds the production frontend and NSIS installer. The default outputs for this version are:
 
-- `src-tauri/target/release/bundle/nsis/AI Usage_0.7.0_x64-setup.exe`, the installer to distribute.
+- `src-tauri/target/release/bundle/nsis/AI Usage_0.7.1_x64-setup.exe`, the installer to distribute.
 - `src-tauri/target/release/ai-usage-tray.exe`, the app executable you can run directly.
 
 If `CARGO_TARGET_DIR` is set, the native outputs are under that directory instead. Build outputs, dependencies and account data are ignored by Git. Building the installer does not run it.

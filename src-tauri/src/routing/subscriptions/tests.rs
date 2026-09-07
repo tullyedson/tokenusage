@@ -114,6 +114,16 @@ struct Fixture {
 async fn catalog() -> Json<Value> {
     Json(json!({"object":"list","data":[{"id":MODEL}]}))
 }
+async fn model_metadata(headers: HeaderMap) -> Json<Value> {
+    assert!(!headers.contains_key("authorization"));
+    Json(
+        json!({"opencode-go":{"models":{MODEL:{"limit":{"context":1000000,"output":131072}}}},"ollama-cloud":{"models":{MODEL:{"limit":{"context":1000000,"output":131072}}}}}),
+    )
+}
+async fn cloud_metadata(Json(body): Json<Value>) -> Json<Value> {
+    assert_eq!(body["model"], MODEL);
+    Json(json!({"model_info":{"general.architecture":"fixture","fixture.context_length":1048576}}))
+}
 async fn quota(State(f): State<Fixture>) -> Json<Value> {
     Json(f.usage.lock().unwrap().clone())
 }
@@ -156,6 +166,8 @@ async fn server(f: Fixture) -> Server {
         .unwrap();
     let base = format!("http://127.0.0.1:{}/", tcp.local_addr().unwrap().port());
     let app = Router::new()
+        .route("/metadata", get(model_metadata))
+        .route("/api/show", post(cloud_metadata))
         .route("/{account}/models", get(catalog))
         .route("/{account}/usage", get(quota))
         .route("/{account}/chat/completions", post(chat))
@@ -178,6 +190,9 @@ fn account(server: &Server, id: &str, kind: SubscriptionKind) -> RouteAccount {
         provider: Arc::new(SubscriptionProvider {
             kind,
             base: format!("{}{id}/", server.base).parse().unwrap(),
+            metadata: Arc::new(PublishedLimits::new(
+                format!("{}metadata", server.base).parse().unwrap(),
+            )),
         }),
         serial: Arc::new(tokio::sync::Mutex::new(())),
     }
@@ -218,6 +233,29 @@ async fn engine(server: &Server, clock: Arc<AtomicI64>) -> Arc<RouterEngine> {
 }
 fn prompt() -> Value {
     json!({"model":MODEL,"messages":[{"role":"user","content":"fictional fixture"}],"tools":[{"type":"function","function":{"name":"example","parameters":{"type":"object"}}}]})
+}
+
+#[tokio::test]
+async fn glm_subscription_chain_advertises_one_million_context_through_the_proxy() {
+    let f = Fixture::default();
+    let server = server(f.clone()).await;
+    let engine = engine(&server, Arc::new(AtomicI64::new(NOW))).await;
+    let library = engine.model_library(false).await.unwrap();
+    assert_eq!(
+        library.catalogs[0].models[0].limits.context,
+        Some(1_048_576)
+    );
+    assert_eq!(
+        library.catalogs[1].models[0].limits.context,
+        Some(1_000_000)
+    );
+    let list = engine.model_list().await.unwrap();
+    assert_eq!(list["data"][0]["id"], MODEL);
+    assert_eq!(list["data"][0]["context_length"], 1_000_000);
+    assert_eq!(list["data"][0]["limit"]["context"], 1_000_000);
+    assert_eq!(list["data"][0]["max_output_tokens"], 131_072);
+    assert_eq!(list["data"][0]["limit"]["output"], 131_072);
+    assert!(f.calls.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

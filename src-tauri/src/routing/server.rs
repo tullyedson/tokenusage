@@ -116,7 +116,7 @@ pub fn application(engine: Arc<RouterEngine>, port: u16) -> Router {
     Router::new()
         .route("/v1/models", get(models))
         .route("/v1/chat/completions", post(chat))
-        .layer(DefaultBodyLimit::max(1024 * 1024))
+        .layer(DefaultBodyLimit::max(16 * 1024 * 1024))
         .with_state(HttpState { engine, port })
 }
 

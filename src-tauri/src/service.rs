@@ -331,7 +331,7 @@ impl UsageService {
         {
             return Err("The account changed. List models again.".into());
         }
-        Ok(result)
+        Ok(result.into_iter().map(|model| model.id).collect())
     }
     pub async fn save_interval(&self, minutes: u64) -> Result<(), String> {
         self.writable()?;

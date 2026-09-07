@@ -6,6 +6,8 @@ pub struct AliasStream {
     pending: Vec<u8>,
     scanned: usize,
     line_start: usize,
+    completed: bool,
+    failed: bool,
 }
 impl AliasStream {
     pub fn push(&mut self, bytes: &[u8], alias: &str) -> Result<Vec<u8>, std::io::Error> {
@@ -20,6 +22,7 @@ impl AliasStream {
             if *byte == b'\n' {
                 let line = &self.pending[self.line_start..self.scanned];
                 if line.is_empty() || line == b"\r" {
+                    self.observe();
                     output.extend(rewrite(&self.pending, alias));
                     self.pending.clear();
                     self.scanned = 0;
@@ -32,8 +35,43 @@ impl AliasStream {
         }
         Ok(output)
     }
-    pub fn finish(self, alias: &str) -> Vec<u8> {
-        rewrite(&self.pending, alias)
+    pub fn finish(&mut self, alias: &str) -> Vec<u8> {
+        self.observe();
+        rewrite(&std::mem::take(&mut self.pending), alias)
+    }
+    pub fn completed(&self) -> bool {
+        self.completed && !self.failed
+    }
+    fn observe(&mut self) {
+        let Ok(text) = std::str::from_utf8(&self.pending) else {
+            return;
+        };
+        let data = text
+            .lines()
+            .filter_map(|line| line.strip_prefix("data:").map(str::trim_start))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if text.lines().any(|line| {
+            line.strip_prefix("event:")
+                .is_some_and(|value| value.trim() == "error")
+        }) {
+            self.failed = true;
+        }
+        if data.trim() == "[DONE]" {
+            self.completed = true;
+        }
+        if let Ok(value) = serde_json::from_str::<Value>(&data) {
+            if value.get("error").is_some_and(|error| !error.is_null()) {
+                self.failed = true;
+            }
+            if value["choices"].as_array().is_some_and(|choices| {
+                choices
+                    .iter()
+                    .any(|choice| choice["finish_reason"].is_string())
+            }) {
+                self.completed = true;
+            }
+        }
     }
 }
 fn rewrite(event: &[u8], alias: &str) -> Vec<u8> {

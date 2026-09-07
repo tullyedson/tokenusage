@@ -9,6 +9,8 @@ fn main() {
             "save_routing",
             "model_library",
             "save_model_pools",
+            "routing_report",
+            "clear_routing_history",
             "discover_models",
             "sign_in",
             "forget_provider",

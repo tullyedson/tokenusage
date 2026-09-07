@@ -2,13 +2,14 @@
 
 A Rust and Tauri 2 app for Windows that shows AI account usage in the system tray and provides an optional local model router.
 
-**Version 0.5.1** adds automatic model discovery and ordered model pools. Create a common name such as `flash-models`, drag in models from different providers or local servers, and order them. Calling apps use that one name while the router follows its fallback list. Plan-only routing is the default for supported accounts. Existing model mappings and fallback rules migrate into pools.
+**Version 0.6.0** adds a live **Reports** tab showing the model pool, provider, account and actual model used by each request, with recent history and fallback reasons. Create common names such as `flash-models` on Models, drag in models from different providers or local servers, and order them. Calling apps use that one name while the router follows its fallback list. Plan-only routing is the default for supported accounts.
 
 | Page | What you can do |
 | --- | --- |
 | **Usage** | See every enabled account's reported allowances, balances, percentages remaining and reset times. |
 | **Settings** | Connect accounts, add more accounts at a provider, and choose refresh/startup behavior. |
 | **Models** | Browse every discovered model, create common names, and drag models into ordered pools. |
+| **Reports** | Follow active pipelines, see their destinations, and inspect recent requests and fallback steps. |
 | **Routing** | Enable the local API and manage its port and client key. |
 
 **Routing supports OpenCode Go, eligible Ollama Cloud subscriptions, Ollama (local), vLLM (local or LAN), and verified OpenRouter free models.** Go and Ollama Cloud require the provider billing setup below to stop at included allowances. OpenAI/Codex, Anthropic, Suno and Higgsfield remain usage-monitoring connections only. A subscription usage bar alone does not enable inference. There is no paid fallback option in the app. Provider-side overages must also be disabled as described below.
@@ -21,10 +22,10 @@ This README describes the checked-out source version. `main` changes only after 
 
 Use Windows x64 and Microsoft Edge WebView2. You do not need Rust or Node.js to run an installer supplied by the maintainer; those are only needed to build the app.
 
-1. Run the **AI Usage 0.5.1 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
+1. Run the **AI Usage 0.6.0 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
 2. Launch **AI Usage** from the Start menu. If you cannot see its tray icon, open Windows' hidden-icons area.
 3. Click or double-click the tray icon to open **Usage**. Right-click it for **Show usage**, **Settings**, or **Exit**.
-4. Use the **Usage**, **Models**, **Routing** and **Settings** tabs in the app window. Closing this window hides it; **Exit** stops the app and its router.
+4. Use the **Usage**, **Models**, **Reports**, **Routing** and **Settings** tabs in the app window. Closing this window hides it; **Exit** stops the app and its router.
 
 To upgrade, finish active routed requests, choose **Exit**, run the newer installer, then reopen AI Usage. Existing settings and account connections are preserved. In **Settings**, enable **Start with Windows** if you want the app to start with its window hidden. The router also starts when the app starts if you have enabled and saved it.
 
@@ -158,6 +159,19 @@ Upgrading converts old aliases, account priority and model-substitution rules in
 
 The saved client key cannot be shown again. Leave its field blank when changing other settings. If you lose it, generate, copy and save a replacement, then update every calling app. Generating a key does not replace the active key until you save.
 
+## See which pipeline and provider are in use
+
+Open **Reports** while a connected app sends requests through AI Usage. No additional client setup is needed.
+
+- **In use now** shows each active request's pool name, provider, account label, actual upstream model, elapsed time and selected pool position. It distinguishes finding a pool, waiting for an account, checking allowance, contacting a provider and streaming. Concurrent requests have separate cards.
+- **Recent requests** keeps the last 100 finished requests. Expand a row to see the selected provider and skipped entries, with safe reasons and provider retry/reset times when available. Each new request gets its own report, so recovery to the preferred pool entry is visible after a reset.
+- Search by pool, model, provider, account or request number. Filter completed, failed, cancelled or fallback requests. Counts describe retained history, not lifetime usage or provider billing.
+- **Clear history** removes finished reports while active requests keep running. This does not change pools, settings, allowances or routing. Reports refresh once per second while the tab is open.
+
+Reports contain routing metadata only and stay in memory until the app exits. They do not retain prompts, completions, tool arguments, session IDs, keys, server URLs or raw provider errors. Only valid requests admitted to the router's eight active slots are recorded; model-list calls, authentication failures, malformed requests, disabled-router responses and busy rejections are not included. Request numbers restart with the app and are returned as `x-ai-usage-request-id` headers for correlation.
+
+A streaming connection can return HTTP 200 and later fail. Reports mark success only after a completion marker and a clean upstream finish, and distinguish stream errors, truncation and cancellation. A completed report means the router received the response, not that the calling application acted on it. Failed streams are not replayed. Very long pools retain the latest 64 routing steps and show how many earlier steps were omitted.
+
 ## Connect a calling app
 
 ### OpenCode
@@ -267,7 +281,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 
 The build script prepares a local test-temp directory, runs frontend tests, Rust tests and Clippy, then builds the production frontend and NSIS installer. The default outputs for this version are:
 
-- `src-tauri/target/release/bundle/nsis/AI Usage_0.5.1_x64-setup.exe`, the installer to distribute.
+- `src-tauri/target/release/bundle/nsis/AI Usage_0.6.0_x64-setup.exe`, the installer to distribute.
 - `src-tauri/target/release/ai-usage-tray.exe`, the app executable you can run directly.
 
 If `CARGO_TARGET_DIR` is set, the native outputs are under that directory instead. Build outputs, dependencies and account data are ignored by Git. Building the installer does not run it.

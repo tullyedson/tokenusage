@@ -21,6 +21,7 @@ use std::{
 use zeroize::Zeroizing;
 
 const CLIENT_KEY: &str = "fictional_local_client_key_for_tests_only_000000";
+mod reporting;
 #[derive(Default)]
 struct MemoryStore(StdMutex<BTreeMap<(String, String), String>>);
 impl ISecretStore for MemoryStore {
@@ -229,6 +230,17 @@ async fn ordered_accounts_fail_over_on_429_and_return_to_preferred_after_reset()
     let response = engine.route(request("server-x")).await;
     assert_eq!(response.headers()["x-ai-usage-account"], "second");
     assert_eq!(body(response).await["model"], "server-x");
+    let report = engine.routing_report();
+    assert!(report.active.is_empty());
+    assert_eq!(report.recent[0].pool, "server-x");
+    assert_eq!(
+        report.recent[0].target.as_ref().unwrap().account_id,
+        "second"
+    );
+    assert_eq!(report.recent[0].fallback_count, 1);
+    assert_eq!(report.recent[0].attempts[0].outcome, "skipped");
+    assert_eq!(report.recent[0].attempts[0].retry_at, Some(1060));
+    assert_eq!(report.recent[0].attempts[1].outcome, "selected");
     let response = engine.route(request("server-x")).await;
     assert_eq!(response.headers()["x-ai-usage-account"], "second");
     drop(response);
@@ -236,6 +248,22 @@ async fn ordered_accounts_fail_over_on_429_and_return_to_preferred_after_reset()
     let response = engine.route(request("server-x")).await;
     assert_eq!(response.headers()["x-ai-usage-account"], "first");
     drop(response);
+    let report = engine.routing_report();
+    assert_eq!(
+        report.recent[0].target.as_ref().unwrap().account_id,
+        "first"
+    );
+    assert_eq!(report.recent[0].fallback_count, 0);
+    let metadata = serde_json::to_string(&report).unwrap();
+    for private in [
+        "fictional test prompt",
+        "fictional-first-key",
+        "fictional-second-key",
+        "sample",
+        "fictional private upstream error",
+    ] {
+        assert!(!metadata.contains(private));
+    }
     let calls = upstream.calls.lock().unwrap();
     assert_eq!(
         calls

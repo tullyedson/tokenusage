@@ -101,6 +101,14 @@ async fn save_model_pools(
     service.save_model_pools(pools).await
 }
 #[tauri::command]
+fn routing_report(service: State<'_, Arc<UsageService>>) -> routing::reports::RoutingReport {
+    service.router.engine.routing_report()
+}
+#[tauri::command]
+fn clear_routing_history(service: State<'_, Arc<UsageService>>) {
+    service.router.engine.clear_routing_history();
+}
+#[tauri::command]
 async fn discover_models(
     service: State<'_, Arc<UsageService>>,
     provider_id: String,
@@ -165,6 +173,8 @@ pub fn run() {
             save_routing,
             model_library,
             save_model_pools,
+            routing_report,
+            clear_routing_history,
             discover_models,
             sign_in,
             forget_provider,

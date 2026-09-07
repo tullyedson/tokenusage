@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AccountRouting, ModelPool, ModelLibrary, Bootstrap, IUsageAppApi, Page, ProviderReport, RouterSettings, Unsubscribe } from "./types";
+import type { AccountRouting, ModelPool, ModelLibrary, Bootstrap, IUsageAppApi, Page, ProviderReport, RouterSettings, RoutingReport, Unsubscribe } from "./types";
 
 export class NativeApi implements IUsageAppApi {
   bootstrap(): Promise<Bootstrap> { return invoke("bootstrap"); }
@@ -11,6 +11,8 @@ export class NativeApi implements IUsageAppApi {
   saveRouting(routing: RouterSettings, clientToken: string): Promise<void> { return invoke("save_routing", { routing, clientToken }); }
   modelLibrary(force = false): Promise<ModelLibrary> { return invoke("model_library", { force }); }
   saveModelPools(pools: ModelPool[]): Promise<void> { return invoke("save_model_pools", { pools }); }
+  routingReport(): Promise<RoutingReport> { return invoke("routing_report"); }
+  clearRoutingHistory(): Promise<void> { return invoke("clear_routing_history"); }
   discoverModels(providerId: string): Promise<string[]> { return invoke("discover_models", { providerId }); }
   connect(providerId: string): Promise<string> { return invoke("sign_in", { providerId }); }
   forget(providerId: string): Promise<void> { return invoke("forget_provider", { providerId }); }

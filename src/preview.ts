@@ -1,5 +1,5 @@
 // Development-only fixture adapter. Vite removes this module from release builds.
-import type { AccountRouting, ModelPool, ModelLibrary, Bootstrap, IUsageAppApi, Page, ProviderDefinition, ProviderReport, RouterSettings, Unsubscribe, UsageMeter } from "./types";
+import type { AccountRouting, ModelPool, ModelLibrary, Bootstrap, IUsageAppApi, Page, ProviderDefinition, ProviderReport, RouterSettings, RoutingReport, Unsubscribe, UsageMeter } from "./types";
 
 const providers: ProviderDefinition[] = [
   { id: "openai", name: "OpenAI", category: "llm", initials: "OA", color: "#87e4b0", description: "Codex allowances included with your ChatGPT subscription.", helpUrl: "https://chatgpt.com/codex/settings/usage", fields: [{ key: "connection", label: "Connection", kind: "select", help: "Use a separate website session or the existing Codex sign-in.", placeholder: "", options: [{ value: "browser", label: "Sign in to ChatGPT" }, { value: "codex", label: "Use signed-in Codex" }] }] },
@@ -9,6 +9,7 @@ const providers: ProviderDefinition[] = [
   { id: "higgsfield", name: "Higgsfield", category: "media", initials: "Hi", color: "#b8a3ef", description: "Your subscription wallet.", helpUrl: "https://higgsfield.ai/me/settings/subscription", fields: [] },
   { id: "openrouter", name: "OpenRouter", category: "llm", initials: "OR", color: "#afa8f4", description: "Account credits or a single key's allowance.", helpUrl: "https://openrouter.ai/settings/keys", fields: [{ key: "connection", label: "Usage source", kind: "select", help: "Account credits require a management key.", placeholder: "", options: [{ value: "credits", label: "Account credits (management key)" }, { value: "key", label: "This key's allowance (standard key)" }] }, { key: "api_key", label: "OpenRouter key", kind: "secret", help: "Saved in Windows Credential Manager in the desktop app.", placeholder: "Paste a key", options: [] }] },
   { id: "opencode", name: "OpenCode", category: "llm", initials: "OC", color: "#e0dcd3", description: "OpenCode Go subscription allowances.", helpUrl: "https://opencode.ai/auth", fields: [{ key: "api_key", label: "OpenCode API key", kind: "secret", help: "Use a key from the workspace with your Go subscription.", placeholder: "Paste a key", options: [] }] },
+  { id: "vllm-local", name: "vLLM (local)", category: "llm", initials: "vL", color: "#87b9cf", description: "Models on your own hardware.", helpUrl: "https://docs.vllm.ai", fields: [] },
 ];
 
 function sample(label: string, percentLeft: number, hours: number, remaining: number | null = null, limit: number | null = null, unit = "%"): UsageMeter {
@@ -31,13 +32,29 @@ function fixture(): Bootstrap {
   }));
   return { providers, settings: { version: 3, refreshMinutes: 5, routing: { enabled: false, port: 43129, pools }, providers: empty ? {} : Object.fromEntries(providers.map(provider => [provider.id, { providerType: "", label: "", routing: { enabled: true }, enabled: true, fields: {}, sessionGeneration: 0, revision: 0 }])) }, reports: empty ? [] : reports, startupError: null, configuredSecrets: {}, inference: { opencode: { description: "OpenCode Go plan allowances." }, ollama: { description: "Ollama Cloud plan allowances." }, openrouter: { description: "Free models only." } }, router: { running: false, baseUrl: "http://127.0.0.1:43129/v1", tokenConfigured: false, error: null } };
 }
+function reportFixture(): RoutingReport {
+  if (new URLSearchParams(location.search).has("empty")) return { active: [], recent: [], historyLimit: 100, attemptLimit: 64 };
+  const now = Math.floor(Date.now() / 1000);
+  const go = { accountId: "opencode", accountLabel: "Go plan", providerId: "opencode", model: "glm-5.3-flash", position: 1 };
+  const cloud = { accountId: "ollama", accountLabel: "Cloud plan", providerId: "ollama", model: "deepseek-flash", position: 2 };
+  const local = { accountId: "local-server", accountLabel: "Desk server", providerId: "vllm-local", model: "qwen-coder", position: 1 };
+  return { historyLimit: 100, attemptLimit: 64, active: [
+    { id: "15", pool: "flash-models", startedAt: now - 7, finishedAt: null, durationMs: 7400, streaming: true, status: "streaming", target: cloud, attempts: [{ target: go, outcome: "skipped", reason: "Included allowance exhausted.", retryAt: now + 3600 }, { target: cloud, outcome: "selected", reason: "Provider accepted the request.", retryAt: null }], omittedAttempts: 0, fallbackCount: 1, httpStatus: null, message: "Receiving the provider's response stream." },
+    { id: "14", pool: "local-coding", startedAt: now - 11, finishedAt: null, durationMs: 11800, streaming: true, status: "streaming", target: local, attempts: [{ target: local, outcome: "selected", reason: "Provider accepted the request.", retryAt: null }], omittedAttempts: 0, fallbackCount: 0, httpStatus: null, message: "Receiving the provider's response stream." },
+  ], recent: [
+    { id: "13", pool: "flash-models", startedAt: now - 30, finishedAt: now - 22, durationMs: 8210, streaming: true, status: "completed", target: cloud, attempts: [{ target: go, outcome: "skipped", reason: "Included allowance exhausted.", retryAt: now + 3600 }, { target: cloud, outcome: "selected", reason: "Provider accepted the request.", retryAt: null }], omittedAttempts: 0, fallbackCount: 1, httpStatus: 200, message: "Provider stream completed." },
+    { id: "12", pool: "local-coding", startedAt: now - 65, finishedAt: now - 60, durationMs: 5090, streaming: false, status: "completed", target: local, attempts: [{ target: local, outcome: "selected", reason: "Provider accepted the request.", retryAt: null }], omittedAttempts: 0, fallbackCount: 0, httpStatus: 200, message: "Completion received." },
+    { id: "11", pool: "plan-only-chat", startedAt: now - 93, finishedAt: now - 92, durationMs: 900, streaming: true, status: "failed", target: null, attempts: [{ target: go, outcome: "skipped", reason: "Included allowance exhausted.", retryAt: now + 3600 }], omittedAttempts: 0, fallbackCount: 0, httpStatus: 429, message: "Every pool entry is unavailable." },
+  ] };
+}
 export class PreviewApi implements IUsageAppApi {
   private data = fixture();
+  private activity = reportFixture();
   private usage?: (reports: ProviderReport[]) => void;
   private changed?: () => void;
   private autostart = false;
   async bootstrap(): Promise<Bootstrap> { return structuredClone(this.data); }
-  async currentPage(): Promise<Page> { return location.hash === "#models" ? "models" : location.hash === "#routing" ? "routing" : location.hash === "#settings" ? "settings" : "usage"; }
+  async currentPage(): Promise<Page> { return location.hash === "#reports" ? "reports" : location.hash === "#models" ? "models" : location.hash === "#routing" ? "routing" : location.hash === "#settings" ? "settings" : "usage"; }
   async refresh(): Promise<void> { this.usage?.(structuredClone(this.data.reports)); }
   async saveProvider(id: string, enabled: boolean, label: string, fields: Record<string, string>, secrets: Record<string, string>, routing: AccountRouting): Promise<void> { if (Object.values(secrets).some(Boolean)) throw new Error("Key storage is available in the desktop app. This is a browser preview."); this.data.settings.providers[id] = { providerType: this.data.settings.providers[id]?.providerType ?? "", label, routing, enabled, fields, sessionGeneration: 0, revision: 0 }; this.changed?.(); }
   async addAccount(providerType: string): Promise<string> { const id = `account-${crypto.randomUUID()}`; this.data.settings.providers[id] = { providerType, label: "Example account", routing: { enabled: true }, enabled: false, fields: {}, sessionGeneration: 0, revision: 0 }; return id; }
@@ -47,6 +64,8 @@ export class PreviewApi implements IUsageAppApi {
     return { catalogs: Object.entries(this.data.settings.providers).filter(([id, config]) => examples[id] && config.enabled && config.routing.enabled).map(([accountId]) => ({ accountId, models: examples[accountId] ?? [], checkedAt: Date.now()/1000, error: null })), pools: this.data.settings.routing.pools.map(pool => ({ ...pool, automatic: false, available: true })) };
   }
   async saveModelPools(pools: ModelPool[]): Promise<void> { this.data.settings.routing.pools = structuredClone(pools); this.changed?.(); }
+  async routingReport(): Promise<RoutingReport> { return structuredClone(this.activity); }
+  async clearRoutingHistory(): Promise<void> { this.activity.recent = []; }
   async discoverModels(): Promise<string[]> { return ["example/local-model"]; }
   async connect(): Promise<string> { throw new Error("Sign-in is available in the desktop app. This is a browser preview."); }
   async forget(id: string): Promise<void> { delete this.data.settings.providers[id]; this.data.reports = this.data.reports.filter(report => report.providerId !== id); this.changed?.(); }

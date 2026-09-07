@@ -26,6 +26,7 @@ it("adds an account with models included by default and saves connection setting
     }
     if (command === "model_library") return { catalogs: [{ accountId: "account-second", models: ["server-x"], checkedAt: 1000, error: null }], pools: [] };
     if (command === "save_model_pools") { data.settings.routing.pools = args?.pools as ModelPool[]; return; }
+    if (command === "routing_report") return { active: [], recent: [], historyLimit: 100, attemptLimit: 64 };
     if (command === "save_routing") { data.settings.routing = { ...args?.routing as RouterSettings, pools: data.settings.routing.pools }; data.router.running = data.settings.routing.enabled; return; }
     if (command === "refresh_usage") return;
     throw new Error(`Unexpected fixture command: ${command}`);
@@ -60,5 +61,10 @@ it("adds an account with models included by default and saves connection setting
   await vi.waitFor(() => expect(data.settings.routing.enabled).toBe(true));
   expect(data.settings.routing.pools[0]?.name).toBe("flash-models");
   expect(data.settings.providers["vllm-local"]?.fields.base_url).toBe("http://127.0.0.1:8000");
+  document.querySelector<HTMLButtonElement>('[data-page="reports"]')!.click();
+  await vi.waitFor(() => expect(document.querySelector("#report-active")?.textContent).toContain("No requests in progress"));
+  expect(mocks.invoke).toHaveBeenCalledWith("routing_report");
+  document.querySelector<HTMLButtonElement>('[data-page="models"]')!.click();
+  await vi.waitFor(() => expect(document.querySelector('[data-pool="flash-models"]')).not.toBeNull());
   window.dispatchEvent(new Event("beforeunload")); vi.unstubAllGlobals();
 });

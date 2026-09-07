@@ -86,7 +86,10 @@ async fn long_tool_history_passes_through_http_and_local_adapter_without_truncat
         }
         let mut expected = request;
         expected["model"] = json!("server-x");
-        assert_eq!(upstream.calls.lock().unwrap().last().unwrap().1, expected);
+        if stream {
+            expected["stream_options"] = json!({"include_usage":true});
+        }
+        assert!(upstream.calls.lock().unwrap().last().unwrap().1 == expected, "The complete request must survive routing, with only the model and default stream usage option changed.");
     }
     assert_eq!(upstream.calls.lock().unwrap().len(), 2);
 }

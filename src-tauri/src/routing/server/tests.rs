@@ -22,6 +22,7 @@ use zeroize::Zeroizing;
 
 const CLIENT_KEY: &str = "fictional_local_client_key_for_tests_only_000000";
 mod distribution;
+mod metrics;
 mod reporting;
 mod validation;
 #[derive(Default)]
@@ -149,6 +150,7 @@ impl IInferenceProvider for Adapter {
         let mut body = request.clone();
         body["model"] = json!(upstream);
         Ok(PreparedRequest {
+            allowance_before: None,
             headers: Default::default(),
             url: format!("{}/{}/chat", self.base, ctx.account_id)
                 .parse()

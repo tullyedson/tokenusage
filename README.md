@@ -2,14 +2,14 @@
 
 A Rust and Tauri 2 app for Windows that shows AI account usage in the system tray and provides an optional local model router.
 
-**Version 0.7.1** removes the old 1,000-message cap so long OpenCode tool conversations can reach the model. It includes sticky load distribution alongside ordered failover. Each pool has its own route type. Provider context/input/output limits pass through the router and into OpenCode. Each model pool advertises the lowest supported limits across its enabled entries. The Models page shows these limits; Reports shows active destinations and recent fallback history. Create common names such as `flash-models` on Models, drag in models from different providers or local servers, and choose how to route them. Calling apps use that one name while the router follows the pool's selection policy. Plan-only routing is the default for supported accounts.
+**Version 0.8.0** adds per-call body sizes, provider token counts, context usage and supported account allowance observations to Reports. It includes long chat histories, sticky load distribution and ordered failover. Each pool has its own route type. Provider context/input/output limits pass through the router and into OpenCode. Each model pool advertises the lowest supported limits across its enabled entries. The Models page shows these limits; Reports shows active destinations and recent fallback history. Create common names such as `flash-models` on Models, drag in models from different providers or local servers, and choose how to route them. Calling apps use that one name while the router follows the pool's selection policy. Plan-only routing is the default for supported accounts.
 
 | Page | What you can do |
 | --- | --- |
 | **Usage** | See every enabled account's reported allowances, balances, percentages remaining and reset times. |
 | **Settings** | Connect accounts, add more accounts at a provider, and choose refresh/startup behavior. |
 | **Models** | Browse every discovered model, create common names, and choose failover or sticky load distribution. |
-| **Reports** | Follow active pipelines, see their destinations, and inspect recent requests and fallback steps. |
+| **Reports** | Follow active pipelines and inspect recent routes, elapsed time, body sizes, tokens and usage percentages. |
 | **Routing** | Enable the local API and manage its port and client key. |
 
 **Routing supports OpenCode Go, eligible Ollama Cloud subscriptions, Ollama (local), vLLM (local or LAN), and verified OpenRouter free models.** Go and Ollama Cloud require the provider billing setup below to stop at included allowances. OpenAI/Codex, Anthropic, Suno and Higgsfield remain usage-monitoring connections only. A subscription usage bar alone does not enable inference. There is no paid fallback option in the app. Provider-side overages must also be disabled as described below.
@@ -22,7 +22,7 @@ This README describes the checked-out source version. `main` changes only after 
 
 Use Windows x64 and Microsoft Edge WebView2. You do not need Rust or Node.js to run an installer supplied by the maintainer; those are only needed to build the app.
 
-1. Run the **AI Usage 0.7.1 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
+1. Run the **AI Usage 0.8.0 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
 2. Launch **AI Usage** from the Start menu. If you cannot see its tray icon, open Windows' hidden-icons area.
 3. Click or double-click the tray icon to open **Usage**. Right-click it for **Show usage**, **Settings**, or **Exit**.
 4. Use the **Usage**, **Models**, **Reports**, **Routing** and **Settings** tabs in the app window. Closing this window hides it; **Exit** stops the app and its router.
@@ -213,9 +213,29 @@ Open **Reports** while a connected app sends requests through AI Usage. No addit
 
 Reports label the route type and explain whether a caller stayed on its server or received a distributed assignment. Selecting entry 2 or 3 for distribution is not counted as fallback unless an earlier attempted entry failed or was skipped.
 
-Reports contain routing metadata only and stay in memory until the app exits. They do not retain prompts, completions, tool arguments, session or instance IDs, keys, server URLs or raw provider errors. Only valid requests admitted to the router's eight active slots are recorded; model-list calls, authentication failures, malformed requests, disabled-router responses and busy rejections are not included. Request numbers restart with the app and are returned as `x-ai-usage-request-id` headers for correlation.
+Reports contain routing metadata and numeric measurements, kept in memory until the app exits. They do not retain prompt or completion content, tool arguments, headers, session or instance IDs, keys, server URLs or raw provider errors. Only valid requests admitted to the router's eight active slots are recorded; model-list calls, authentication failures, malformed requests, disabled-router responses and busy rejections are not included. Request numbers restart with the app and are returned as `x-ai-usage-request-id` headers for correlation.
 
 A streaming connection can return HTTP 200 and later fail. Reports mark success only after a completion marker and a clean upstream finish, and distinguish stream errors, truncation and cancellation. A completed report means the router received the response, not that the calling application acted on it. Failed streams are not replayed. Very long pools retain the latest 64 routing steps and show how many earlier steps were omitted.
+
+### Per-call sizes, tokens and percentages
+
+Expand a finished request in **Reports** to see these measurements beside its elapsed time. Active cards update response sizes as data arrives. No new account settings are needed.
+
+| Measurement | Meaning |
+| --- | --- |
+| Request body | Exact JSON body bytes received from the client, including whitespace and UTF-8. |
+| Response received | Body bytes read from the accepted upstream response, including SSE framing when streaming. Excludes HTTP headers, preflight reads and rejected routing attempts; this is not a wire/compression or client-delivery measurement. |
+| Input / output tokens | Provider-reported `prompt_tokens` and `completion_tokens`. Cached input and reasoning counts are displayed as included subsets when supplied. |
+| Context used | Total reported tokens divided by the pool's context limit. For example, 25,000 tokens in a 1,000,000-token pool use 2.5% of context. This measures the entire current call, including any history the client sent. |
+| Observed allowance change | A comparable before/after change in account usage. OpenCode Go supports this for its 5-hour, weekly and monthly windows. Other adapters show unavailable until they supply this optional measurement. |
+
+Compatible adapters request `stream_options.include_usage` by default; an explicit caller opt-out is preserved. Tokens can appear only in the final event, and providers may omit them. Missing or invalid data stays unavailable, never an invented zero or a character-based token estimate. Interrupted requests retain partial measurements.
+
+**Allowance changes use percentage points (pp).** A weekly reading moving from 12% used to 12.125% used appears as **+0.125 pp**. It is an observation of the account, not an exact allocation to that call: other applications, rounding and delayed provider updates can affect it. Zero means no reported change. Resets, decreasing counters and failed reads stay unavailable. Context usage and subscription usage are separate measurements; tokens are not converted to a subscription percentage from public prices.
+
+Go reuses its existing eligibility read before generation and makes one optional usage read after the accepted response ends. That read runs in the background with a two-second timeout and at most four concurrent observations. It does not delay responses, grant eligibility, change route order or trigger another generation. Clearing history prevents a late observation from recreating a removed row.
+
+Context percentages use fresh cached model limits with the same lowest-member rule as the client model catalog. If limits are unavailable, open **Models** and refresh the catalogs before the next call. Reporting does not fetch model metadata during generation; cached limits expire after five minutes. Measurements do not impose additional message, token, spending or history limits on later calls.
 
 ## Connect a calling app
 
@@ -334,7 +354,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 
 The build script prepares a local test-temp directory, runs frontend tests, Rust tests and Clippy, then builds the production frontend and NSIS installer. The default outputs for this version are:
 
-- `src-tauri/target/release/bundle/nsis/AI Usage_0.7.1_x64-setup.exe`, the installer to distribute.
+- `src-tauri/target/release/bundle/nsis/AI Usage_0.8.0_x64-setup.exe`, the installer to distribute.
 - `src-tauri/target/release/ai-usage-tray.exe`, the app executable you can run directly.
 
 If `CARGO_TARGET_DIR` is set, the native outputs are under that directory instead. Build outputs, dependencies and account data are ignored by Git. Building the installer does not run it.

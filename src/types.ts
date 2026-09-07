@@ -22,7 +22,10 @@ export type Unsubscribe = () => void;
 export type RequestStatus = "routing" | "waiting" | "checking" | "connecting" | "streaming" | "completed" | "failed" | "cancelled";
 export type RouteTarget = { accountId: string; accountLabel: string; providerId: string; model: string; position: number };
 export type RouteAttempt = { target: RouteTarget; outcome: "selected" | "skipped" | "failed"; reason: string; retryAt: number | null };
-export type RequestReport = { id: string; pool: string; mode: RouteMode; startedAt: number; finishedAt: number | null; durationMs: number; streaming: boolean; status: RequestStatus; target: RouteTarget | null; attempts: RouteAttempt[]; omittedAttempts: number; fallbackCount: number; httpStatus: number | null; message: string };
+export type TokenUsage = { input: number | null; output: number | null; total: number | null; cachedInput: number | null; reasoning: number | null };
+export type AllowanceObservation = { status: "pending" | "observed" | "unavailable"; changes: { label: string; beforePercent: number; afterPercent: number; percentagePoints: number }[] };
+export type CallMetrics = { requestBytes: number | null; responseBytes: number | null; tokens: TokenUsage | null; contextLimit: number | null; contextUsedPercent: number | null; allowance: AllowanceObservation | null };
+export type RequestReport = { id: string; pool: string; mode: RouteMode; startedAt: number; finishedAt: number | null; durationMs: number; streaming: boolean; status: RequestStatus; target: RouteTarget | null; attempts: RouteAttempt[]; omittedAttempts: number; fallbackCount: number; httpStatus: number | null; message: string; metrics: CallMetrics };
 export type RoutingReport = { active: RequestReport[]; recent: RequestReport[]; historyLimit: number; attemptLimit: number };
 
 export interface IUsageAppApi {

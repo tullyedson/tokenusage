@@ -63,6 +63,25 @@ pub fn account_issue(account: &RouteAccount) -> Option<String> {
 }
 
 impl ModelCatalog {
+    /// Reporting uses fresh cached bounds only and never adds discovery I/O to
+    /// a completion. A missing, changed, failed or stale catalog stays unknown.
+    pub async fn cached(&self, accounts: &[RouteAccount], now: i64) -> Vec<CatalogReport> {
+        let cache = self.cache.lock().await;
+        accounts
+            .iter()
+            .filter_map(|account| {
+                cache
+                    .get(&account.id)
+                    .filter(|old| {
+                        old.config == account.config
+                            && old.report.error.is_none()
+                            && (0..300).contains(&now.saturating_sub(old.attempted_at))
+                    })
+                    .map(|old| old.report.clone())
+            })
+            .collect()
+    }
+
     pub async fn read(
         &self,
         ctx: CatalogContext<'_>,

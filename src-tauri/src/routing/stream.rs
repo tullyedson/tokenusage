@@ -1,4 +1,5 @@
 //! Preserve SSE events while keeping the caller's pool name in completion chunks.
+use super::metrics::TokenUsage;
 use serde_json::Value;
 
 #[derive(Default)]
@@ -8,6 +9,7 @@ pub struct AliasStream {
     line_start: usize,
     completed: bool,
     failed: bool,
+    tokens: Option<TokenUsage>,
 }
 impl AliasStream {
     pub fn push(&mut self, bytes: &[u8], alias: &str) -> Result<Vec<u8>, std::io::Error> {
@@ -42,6 +44,9 @@ impl AliasStream {
     pub fn completed(&self) -> bool {
         self.completed && !self.failed
     }
+    pub fn tokens(&self) -> Option<TokenUsage> {
+        self.tokens
+    }
     fn observe(&mut self) {
         let Ok(text) = std::str::from_utf8(&self.pending) else {
             return;
@@ -61,6 +66,9 @@ impl AliasStream {
             self.completed = true;
         }
         if let Ok(value) = serde_json::from_str::<Value>(&data) {
+            if value.get("usage").is_some_and(|usage| !usage.is_null()) {
+                self.tokens = TokenUsage::from_response(&value);
+            }
             if value.get("error").is_some_and(|error| !error.is_null()) {
                 self.failed = true;
             }

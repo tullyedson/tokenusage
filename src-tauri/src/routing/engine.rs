@@ -1,8 +1,10 @@
 use super::{
+    allowance::{AllowanceProbe, ProbeOnDrop},
     catalog::{self, CatalogContext, ModelCatalog, ModelLibrary},
     config::{RouteMode, RouterSettings},
     distribution::LoadDistribution,
     metadata::InferenceModel,
+    metrics::{AllowanceSnapshot, TokenUsage},
     reports::{RequestStatus, RequestTrace, RouteTarget, RoutingReport, RoutingReports},
 };
 use crate::{credentials::ISecretStore, model::ProviderConfig};
@@ -40,6 +42,7 @@ pub struct PreparedRequest {
     pub body: Value,
     pub key: Option<Zeroizing<String>>,
     pub headers: reqwest::header::HeaderMap,
+    pub allowance_before: Option<AllowanceSnapshot>,
 }
 
 #[derive(Clone, Debug)]
@@ -67,6 +70,13 @@ pub trait IInferenceProvider: Send + Sync {
         request: &Value,
         upstream: &str,
     ) -> Result<PreparedRequest, RouteFailure>;
+    /// Optional reporting read. It never grants eligibility or changes routing policy.
+    async fn observe_allowance(
+        &self,
+        _context: &InferenceContext<'_>,
+    ) -> Option<AllowanceSnapshot> {
+        None
+    }
 }
 
 #[derive(Clone)]
@@ -99,6 +109,7 @@ pub struct RouterEngine {
     clock: Arc<dyn Fn() -> i64 + Send + Sync>,
     catalog: ModelCatalog,
     reports: Arc<RoutingReports>,
+    allowance_probes: Arc<Semaphore>,
 }
 
 impl RouterEngine {
@@ -121,6 +132,7 @@ impl RouterEngine {
             clock: Arc::new(|| chrono::Utc::now().timestamp()),
             catalog: ModelCatalog::default(),
             reports: Arc::new(RoutingReports::default()),
+            allowance_probes: Arc::new(Semaphore::new(4)),
         }
     }
     #[cfg(test)]
@@ -208,6 +220,16 @@ impl RouterEngine {
         session: Option<&str>,
         instance: Option<&str>,
     ) -> Response {
+        self.route_measured(request, session, instance, None).await
+    }
+
+    pub async fn route_measured(
+        self: &Arc<Self>,
+        request: Value,
+        session: Option<&str>,
+        instance: Option<&str>,
+        request_bytes: Option<u64>,
+    ) -> Response {
         let caller = match instance {
             Some(value) if valid_session(value) => Some(format!("instance:{value}")),
             Some(_) => return error(StatusCode::BAD_REQUEST, "invalid_instance", "Use an opaque instance ID of at most 200 letters, numbers, underscores or hyphens."),
@@ -264,6 +286,7 @@ impl RouterEngine {
             .reports
             .begin(requested, request["stream"].as_bool().unwrap_or(false));
         let request_id = started.id().to_owned();
+        started.request_bytes(request_bytes);
         let mut trace = Some(started);
         let mut response = self
             .route_tracked(
@@ -339,6 +362,13 @@ impl RouterEngine {
                 "This model pool is empty. Add provider models on the Models page, then save.",
             );
         }
+        let catalogs = self.catalog.cached(&config.accounts, (self.clock)()).await;
+        let limits = catalog::library(&config.accounts, catalogs, std::slice::from_ref(&pool))
+            .pools
+            .into_iter()
+            .find(|entry| entry.pool.name == pool.name)
+            .and_then(|entry| entry.limits.context);
+        trace.as_ref().expect("Active report").context_limit(limits);
         let mut remaining = (0..pool.members.len()).collect::<Vec<_>>();
         let mut tried = 0;
         while !remaining.is_empty() {
@@ -506,8 +536,10 @@ impl RouterEngine {
                 _ = &mut deadline => return error(StatusCode::GATEWAY_TIMEOUT, "timeout", "Routing timed out."),
                 result = account.provider.prepare(&context, &request, &member.model) => result,
             };
+            let mut allowance_before = None;
             let result = match prepared {
-                Ok(prepared) => {
+                Ok(mut prepared) => {
+                    allowance_before = prepared.allowance_before.take();
                     trace.as_ref().expect("Active report").progress(
                         target.clone(),
                         RequestStatus::Connecting,
@@ -527,6 +559,18 @@ impl RouterEngine {
                     if cancelled.is_cancelled() {
                         return cancelled_response();
                     }
+                    let report = trace.as_ref().expect("Active report");
+                    report.response_started();
+                    let probe = ProbeOnDrop(allowance_before.map(|before| AllowanceProbe {
+                        before,
+                        account: account.clone(),
+                        client: self.client.clone(),
+                        secrets: self.secrets.clone(),
+                        clock: self.clock.clone(),
+                        cancelled: cancelled.clone(),
+                        slots: self.allowance_probes.clone(),
+                        update: report.allowance_update(),
+                    }));
                     trace.as_ref().expect("Active report").attempt(
                         target.clone(),
                         "selected",
@@ -566,6 +610,7 @@ impl RouterEngine {
                         // The worker owns upstream I/O and permits so cancellation also
                         // releases them when a downstream client stops reading.
                         tokio::spawn(async move {
+                            let _probe = probe;
                             let (_serial, _permit, _assignment) = (serial, permit, assignment);
                             let mut aliases = super::stream::AliasStream::default();
                             loop {
@@ -577,6 +622,7 @@ impl RouterEngine {
                                 let finished = matches!(result, Ok(None));
                                 let item = match result {
                                     Ok(Some(bytes)) => {
+                                        stream_trace.response_bytes(bytes.len());
                                         aliases.push(&bytes, &alias).map(Bytes::from)
                                     }
                                     Ok(None) => Ok(Bytes::from(aliases.finish(&alias))),
@@ -586,6 +632,7 @@ impl RouterEngine {
                                         return;
                                     }
                                 };
+                                stream_trace.tokens(aliases.tokens());
                                 let failed = item.is_err();
                                 if item.as_ref().is_ok_and(Bytes::is_empty) && !finished {
                                     continue;
@@ -617,9 +664,14 @@ impl RouterEngine {
                             .body(Body::from_stream(chunks))
                             .expect("Static response headers")
                     } else {
-                        let body = tokio::select! { _ = cancelled.cancelled() => return cancelled_response(), result = read_json(&mut response, 8 * 1024 * 1024) => result };
+                        let _probe = probe;
+                        let report = trace.as_ref().expect("Active report");
+                        let body = tokio::select! { _ = cancelled.cancelled() => return cancelled_response(), result = read_json_observed(&mut response, 8 * 1024 * 1024, |bytes| report.response_bytes(bytes)) => result };
                         match body {
-                                Ok(mut body) if body["choices"].is_array() && body.get("error").is_none() => { body["model"] = json!(requested); Json(body).into_response() },
+                                Ok(mut body) if body["choices"].is_array() && body.get("error").is_none() => {
+                                    report.tokens(TokenUsage::from_response(&body));
+                                    body["model"] = json!(requested); Json(body).into_response()
+                                },
                                 _ => return error(StatusCode::BAD_GATEWAY, "invalid_upstream", "The selected server returned an invalid completion; request was not replayed."),
                             }
                     };
@@ -827,12 +879,21 @@ pub fn retry_time(headers: &reqwest::header::HeaderMap, now: i64) -> i64 {
 }
 
 pub async fn read_json(response: &mut reqwest::Response, limit: usize) -> Result<Value, String> {
+    read_json_observed(response, limit, |_| {}).await
+}
+
+async fn read_json_observed(
+    response: &mut reqwest::Response,
+    limit: usize,
+    mut observed: impl FnMut(usize),
+) -> Result<Value, String> {
     let mut bytes = Vec::new();
     while let Some(chunk) = response
         .chunk()
         .await
         .map_err(|_| "Could not read the server response.")?
     {
+        observed(chunk.len());
         if bytes.len() + chunk.len() > limit {
             return Err("Server response is too large.".into());
         }

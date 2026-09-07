@@ -1,9 +1,11 @@
+mod allowance;
 pub mod catalog;
 pub mod config;
 mod distribution;
 pub mod engine;
 mod legacy;
 pub mod metadata;
+pub mod metrics;
 pub(crate) mod migration;
 pub(crate) mod network;
 pub mod providers;

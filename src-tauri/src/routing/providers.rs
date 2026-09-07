@@ -261,10 +261,12 @@ impl IInferenceProvider for HttpProvider {
         }
         let mut body = request.clone();
         body["model"] = json!(upstream);
+        super::metrics::request_stream_usage(&mut body);
         if matches!(self, Self::OpenRouterFree) {
             body["provider"] = json!({"max_price":{"prompt":0,"completion":0,"request":0,"image":0},"allow_fallbacks":false});
         }
         Ok(PreparedRequest {
+            allowance_before: None,
             headers: Default::default(),
             url: self
                 .base(ctx.config)

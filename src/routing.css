@@ -4,3 +4,5 @@
 @media(max-width:650px){.models-layout{grid-template-columns:1fr}.catalog-list{max-height:300px}.app-header nav button{padding:8px 9px}.brand{gap:8px}.models-toolbar p{flex-basis:100%}.member-actions{flex-direction:row}}
 
 .model-label{display:grid;gap:4px;min-width:0;flex:1}.model-label small,.pool-limits{font-size:11px;color:var(--muted);line-height:1.5}.pool-limits{margin:0 0 12px}
+
+.pool-mode{display:flex;align-items:center;gap:12px;margin:0 0 12px;font-size:12px;color:#c0d3b7}.pool-mode select{background:#101b15;color:#e4eddf;border:1px solid #3b4d3d;border-radius:8px;font:inherit;padding:9px 12px;min-width:0;flex:1}.pool-mode select:focus-visible{outline:2px solid #a1d381;outline-offset:2px}.pool-hint code{overflow-wrap:anywhere}

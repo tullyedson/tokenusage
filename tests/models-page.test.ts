@@ -67,7 +67,7 @@ it("creates a mixed pool, supports drag and keyboard ordering, and saves the exa
   button('[data-pool="flash-models"] [data-down]').click();
   button('[data-pool="flash-models"] [data-member-index="1"] [data-down]').click();
   button("[data-save-pools]").click();
-  await vi.waitFor(() => expect(save).toHaveBeenCalledWith([{ name: "flash-models", members: [
+  await vi.waitFor(() => expect(save).toHaveBeenCalledWith([{ name: "flash-models", mode: "failover", members: [
     { accountId: "go", model: "glm-flash" }, { accountId: "cloud", model: "deepseek-flash" }, { accountId: "local", model: "Qwen" },
   ] }]));
 });
@@ -92,11 +92,29 @@ it("automatically groups same IDs and allows custom order to reset to discovery"
   expect(document.querySelector('[data-pool="glm-flash"] .pool-badge')?.textContent).toBe("Automatic");
   button('[data-pool="glm-flash"] [data-down]').click();
   button("[data-save-pools]").click();
-  await vi.waitFor(() => expect(save).toHaveBeenCalledWith([{ name: "glm-flash", members: [
+  await vi.waitFor(() => expect(save).toHaveBeenCalledWith([{ name: "glm-flash", mode: "failover", members: [
     { accountId: "cloud", model: "glm-flash" }, { accountId: "go", model: "glm-flash" },
   ] }]));
   await vi.waitFor(() => expect(button("[data-save-pools]").textContent).toBe("Save pools"));
   button('[data-pool="glm-flash"] [data-delete-pool]').click();
   button("[data-save-pools]").click();
   await vi.waitFor(() => expect(save).toHaveBeenLastCalledWith([]));
+});
+
+it("saves load distribution as an independent draft setting and can switch back to failover", async () => {
+  const { page, root, save } = await setup(); create("balanced");
+  button('[data-catalog-account="go"][data-catalog-model="glm-flash"] button').click();
+  const select = () => document.querySelector<HTMLSelectElement>('[data-pool="balanced"] [data-pool-mode]')!;
+  expect(select().value).toBe("failover");
+  select().value = "loadDistribution"; select().dispatchEvent(new Event("change"));
+  expect(document.querySelector('[data-pool="balanced"]')?.textContent).toContain("x-ai-usage-instance");
+  page.unmount(); page.mount(root, structuredClone(data));
+  await vi.waitFor(() => expect(button("[data-refresh-models]").disabled).toBe(false));
+  expect(select().value).toBe("loadDistribution");
+  button("[data-save-pools]").click();
+  await vi.waitFor(() => expect(save).toHaveBeenLastCalledWith([{ name: "balanced", mode: "loadDistribution", members: [{ accountId: "go", model: "glm-flash" }] }]));
+  await vi.waitFor(() => expect(select().disabled).toBe(false));
+  select().value = "failover"; select().dispatchEvent(new Event("change"));
+  button("[data-save-pools]").click();
+  await vi.waitFor(() => expect(save).toHaveBeenLastCalledWith([{ name: "balanced", mode: "failover", members: [{ accountId: "go", model: "glm-flash" }] }]));
 });

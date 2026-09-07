@@ -42,6 +42,20 @@ it("shows concurrent pipelines and provider destinations, preserves expanded ste
   expect(document.querySelector("#report-recent")?.textContent).toContain("flash-models");
 });
 
+it("labels load-distribution selections without counting pool position as fallback", async () => {
+  const { read, report } = await setup();
+  const changed = structuredClone(report);
+  changed.active[1]!.mode = "loadDistribution";
+  changed.active[1]!.target!.position = 3;
+  changed.recent[1]!.mode = "loadDistribution";
+  changed.recent[1]!.target!.position = 3;
+  read.mockResolvedValue(changed);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(document.querySelector('[data-active-request="14"]')?.textContent).toContain("Load distribution");
+  expect(document.querySelector('[data-request="12"]')?.textContent).toContain("Load distribution");
+  expect(document.querySelector('[data-request="12"] .request-result')?.textContent).not.toContain("fallback");
+});
+
 it("escapes provider metadata, reports read failures, and stops polling when the tab closes", async () => {
   const { read, report, page } = await setup();
   const malicious = structuredClone(report);

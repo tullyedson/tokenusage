@@ -21,6 +21,7 @@ use std::{
 use zeroize::Zeroizing;
 
 const CLIENT_KEY: &str = "fictional_local_client_key_for_tests_only_000000";
+mod distribution;
 mod reporting;
 #[derive(Default)]
 struct MemoryStore(StdMutex<BTreeMap<(String, String), String>>);
@@ -170,6 +171,7 @@ fn account(id: &str, _model: &str, provider: Arc<dyn IInferenceProvider>) -> Rou
 }
 fn pool(name: &str, entries: &[(&str, &str)]) -> ModelPool {
     ModelPool {
+        mode: Default::default(),
         name: name.into(),
         members: entries
             .iter()

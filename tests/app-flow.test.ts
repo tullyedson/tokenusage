@@ -53,7 +53,7 @@ it("adds an account with models included by default and saves connection setting
   create.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
   document.querySelector<HTMLButtonElement>("[data-add-to-pool]")!.click();
   document.querySelector<HTMLButtonElement>("[data-save-pools]")!.click();
-  await vi.waitFor(() => expect(data.settings.routing.pools).toEqual([{ name: "flash-models", members: [{ accountId: "account-second", model: "server-x" }] }]));
+  await vi.waitFor(() => expect(data.settings.routing.pools).toEqual([{ name: "flash-models", mode: "failover", members: [{ accountId: "account-second", model: "server-x" }] }]));
   document.querySelector<HTMLButtonElement>('[data-page="routing"]')!.click();
   const routingForm = document.querySelector<HTMLFormElement>("#routing-form")!;
   routingForm.querySelector<HTMLInputElement>('[name="routerEnabled"]')!.checked = true;

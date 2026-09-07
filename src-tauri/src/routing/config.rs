@@ -23,10 +23,28 @@ pub struct PoolMember {
     pub model: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RouteMode {
+    #[default]
+    Failover,
+    LoadDistribution,
+}
+impl RouteMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Failover => "failover",
+            Self::LoadDistribution => "loadDistribution",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelPool {
     pub name: String,
+    #[serde(default)]
+    pub mode: RouteMode,
     pub members: Vec<PoolMember>,
 }
 
@@ -98,9 +116,24 @@ pub fn validate_pools(pools: &[ModelPool], accounts: &BTreeSet<String>) -> Resul
 mod tests {
     use super::*;
     #[test]
+    fn existing_pools_default_to_failover_and_modes_round_trip() {
+        let old = serde_json::json!({"name":"sample", "members":[]});
+        let mut pool: ModelPool = serde_json::from_value(old).unwrap();
+        assert_eq!(pool.mode, RouteMode::Failover);
+        pool.mode = RouteMode::LoadDistribution;
+        let value = serde_json::to_value(&pool).unwrap();
+        assert_eq!(value["mode"], "loadDistribution");
+        assert_eq!(serde_json::from_value::<ModelPool>(value).unwrap(), pool);
+        assert!(serde_json::from_value::<ModelPool>(
+            serde_json::json!({"name":"sample", "members":[], "mode":"unknown"})
+        )
+        .is_err());
+    }
+    #[test]
     fn pools_use_ordered_account_model_pairs_and_unique_space_free_names() {
         let accounts = BTreeSet::from(["first".into(), "second".into()]);
         let mut pools = vec![ModelPool {
+            mode: Default::default(),
             name: "flash-models".into(),
             members: vec![
                 PoolMember {

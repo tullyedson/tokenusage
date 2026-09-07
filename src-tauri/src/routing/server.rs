@@ -182,17 +182,31 @@ async fn chat(
     let session = headers
         .get("x-ai-usage-session")
         .or_else(|| headers.get("x-opencode-session"));
-    match session {
-        None => state.engine.route(body).await,
-        Some(value) => match value.to_str() {
-            Ok(value) => state.engine.route_with_session(body, Some(value)).await,
-            Err(_) => error(
+    let instance = headers.get("x-ai-usage-instance");
+    let session = match session.map(|value| value.to_str()).transpose() {
+        Ok(value) => value,
+        Err(_) => {
+            return error(
                 StatusCode::BAD_REQUEST,
                 "invalid_session",
                 "Invalid session header.",
-            ),
-        },
-    }
+            )
+        }
+    };
+    let instance = match instance.map(|value| value.to_str()).transpose() {
+        Ok(value) => value,
+        Err(_) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "invalid_instance",
+                "Invalid instance header.",
+            )
+        }
+    };
+    state
+        .engine
+        .route_with_identity(body, session, instance)
+        .await
 }
 
 #[cfg(test)]

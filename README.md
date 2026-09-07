@@ -2,13 +2,13 @@
 
 A Rust and Tauri 2 app for Windows that shows AI account usage in the system tray and provides an optional local model router.
 
-**Version 0.6.1** passes provider context/input/output limits through the router and into OpenCode. Each model pool advertises the lowest supported limits across its enabled entries. The Models page shows these limits; Reports shows active destinations and recent fallback history. Create common names such as `flash-models` on Models, drag in models from different providers or local servers, and order them. Calling apps use that one name while the router follows its fallback list. Plan-only routing is the default for supported accounts.
+**Version 0.7.0** adds sticky load distribution alongside ordered failover. Each pool has its own route type. Provider context/input/output limits pass through the router and into OpenCode. Each model pool advertises the lowest supported limits across its enabled entries. The Models page shows these limits; Reports shows active destinations and recent fallback history. Create common names such as `flash-models` on Models, drag in models from different providers or local servers, and choose how to route them. Calling apps use that one name while the router follows the pool's selection policy. Plan-only routing is the default for supported accounts.
 
 | Page | What you can do |
 | --- | --- |
 | **Usage** | See every enabled account's reported allowances, balances, percentages remaining and reset times. |
 | **Settings** | Connect accounts, add more accounts at a provider, and choose refresh/startup behavior. |
-| **Models** | Browse every discovered model, create common names, and drag models into ordered pools. |
+| **Models** | Browse every discovered model, create common names, and choose failover or sticky load distribution. |
 | **Reports** | Follow active pipelines, see their destinations, and inspect recent requests and fallback steps. |
 | **Routing** | Enable the local API and manage its port and client key. |
 
@@ -22,7 +22,7 @@ This README describes the checked-out source version. `main` changes only after 
 
 Use Windows x64 and Microsoft Edge WebView2. You do not need Rust or Node.js to run an installer supplied by the maintainer; those are only needed to build the app.
 
-1. Run the **AI Usage 0.6.1 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
+1. Run the **AI Usage 0.7.0 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
 2. Launch **AI Usage** from the Start menu. If you cannot see its tray icon, open Windows' hidden-icons area.
 3. Click or double-click the tray icon to open **Usage**. Right-click it for **Show usage**, **Settings**, or **Exit**.
 4. Use the **Usage**, **Models**, **Reports**, **Routing** and **Settings** tabs in the app window. Closing this window hides it; **Exit** stops the app and its router.
@@ -108,7 +108,7 @@ vllm serve "YOUR_CHAT_MODEL_ID" --host 127.0.0.1 --port 8000
 
 In AI Usage, choose **Settings > LLM > vLLM (local)**, set **Server URL** to `http://127.0.0.1:8000`, enter your server's key in **Server API key** if it requires authentication, and choose **Connect account**. A server in WSL or a container must expose its port to the Windows host. For a server on another machine, configure its listener for your LAN and use its private IP, such as `http://192.168.1.50:8000`.
 
-Local server URLs accept a root URL or `/v1`. They accept `localhost`, loopback IPs and private LAN IPs; public hosts and custom DNS names are rejected. These connections are for model servers running on your hardware. AI Usage does not install models, start these servers, or manage their hardware.
+Local server URLs accept a root URL or `/v1`. They accept `localhost`, loopback IPs, private LAN IPs and `.local` hostnames, such as `http://node-a.local:11434`. The operating system must resolve the hostname. Every `.local` connection uses only the loopback/private addresses from that lookup; empty or mixed public/private answers are rejected. Other custom DNS names and public hosts are rejected. These connections are for model servers running on your hardware. AI Usage does not install models, start these servers, or manage their hardware.
 
 **OpenRouter free models**
 
@@ -139,6 +139,29 @@ Use the exact IDs shown in your own catalog. The examples do not install models 
 **Automatic names:** Models with the same exact ID are grouped automatically across eligible accounts, in stable account-ID order. Expand **Show automatic model names** to inspect or customize those groups. Editing an automatic group saves a custom pool with that name. **Reset to automatic** discards that override. A custom pool name takes precedence over automatic discovery; there are no separate account-priority or fallback-rule controls.
 
 Draft changes survive page navigation and catalog refresh. They take effect only after **Save pools**. A failed save leaves the draft intact.
+
+### Choose a route type
+
+Each pool has a **Route type** selector. Choose a type and **Save pools**. Existing pools and automatic names default to **Failover**.
+
+| Route type | Selection behavior |
+| --- | --- |
+| **Failover** | Try entries from top to bottom. Each new request returns to the first available entry after its allowance resets or server recovers. |
+| **Load distribution** | Keep a caller on its assigned account/model. For a new caller, choose an eligible entry with the fewest active requests, then the fewest assigned callers. Rotate ties in pool order. An unavailable server causes reassignment to another eligible entry. |
+
+For example, connect three Ollama servers in Settings, each with its own account label and `.local` Server URL. Create `gemma4`, add each server's exact Gemma model ID from the left-hand catalog, choose **Load distribution**, and save. The model IDs may differ across servers. The shared context limit is still the lowest supported limit across all enabled entries.
+
+A calling app should send **`x-ai-usage-instance`** with a stable, unique ID for that app instance, such as `writer-1`. Keep it the same on every request from that instance; use `writer-2` for another instance. IDs accept 1-200 ASCII letters, digits, underscores or hyphens. This identifier controls routing only and is never forwarded to providers. Do not use a password, API key, user name or prompt as an identifier.
+
+- With an instance ID, all that instance's conversations stay on its assigned server for the requested pool.
+- Without an instance ID, `x-ai-usage-session` (or `x-opencode-session`) provides stickiness per conversation. The existing OpenCode plugin supplies this automatically.
+- Without either ID, requests are distributed independently. The shared API key and client IP are not treated as caller identity, so different apps on the same PC can spread across servers.
+
+Stickiness takes priority over moving an existing caller to an idle server. Requests still serialize per account, including streams; different accounts can run concurrently within the router's eight-request limit. Load reflects requests seen by this router, not other clients' GPU usage. Selection reserves load before waiting for an account, and releases it on completion, disconnect or cancellation.
+
+After a failure, the caller stays on its replacement; recovered entries can receive new callers. Assignments are held only in memory, expire after 30 minutes idle, and reset when accounts, pools or routing settings are saved or the app restarts. At most 4,096 caller/pool assignments are retained; the least recently used idle assignment is evicted when full. An active assignment is retained until its requests finish. Caller IDs never enter Reports or persisted settings.
+
+Availability and plan-only checks apply to both route types. Only failures known to be safe to retry can select another entry. Ambiguous submissions, interrupted responses and streams are never replayed.
 
 ### Context and output limits
 
@@ -188,7 +211,9 @@ Open **Reports** while a connected app sends requests through AI Usage. No addit
 - Search by pool, model, provider, account or request number. Filter completed, failed, cancelled or fallback requests. Counts describe retained history, not lifetime usage or provider billing.
 - **Clear history** removes finished reports while active requests keep running. This does not change pools, settings, allowances or routing. Reports refresh once per second while the tab is open.
 
-Reports contain routing metadata only and stay in memory until the app exits. They do not retain prompts, completions, tool arguments, session IDs, keys, server URLs or raw provider errors. Only valid requests admitted to the router's eight active slots are recorded; model-list calls, authentication failures, malformed requests, disabled-router responses and busy rejections are not included. Request numbers restart with the app and are returned as `x-ai-usage-request-id` headers for correlation.
+Reports label the route type and explain whether a caller stayed on its server or received a distributed assignment. Selecting entry 2 or 3 for distribution is not counted as fallback unless an earlier attempted entry failed or was skipped.
+
+Reports contain routing metadata only and stay in memory until the app exits. They do not retain prompts, completions, tool arguments, session or instance IDs, keys, server URLs or raw provider errors. Only valid requests admitted to the router's eight active slots are recorded; model-list calls, authentication failures, malformed requests, disabled-router responses and busy rejections are not included. Request numbers restart with the app and are returned as `x-ai-usage-request-id` headers for correlation.
 
 A streaming connection can return HTTP 200 and later fail. Reports mark success only after a completion marker and a clean upstream finish, and distinguish stream errors, truncation and cancellation. A completed report means the router received the response, not that the calling application acted on it. Failed streams are not replayed. Very long pools retain the latest 64 routing steps and show how many earlier steps were omitted.
 
@@ -216,6 +241,7 @@ To update an existing connection, replace the project plugin with the current ex
 | API key | The **client key** generated and saved in AI Usage |
 | Model | A discovered model ID or saved pool name, such as `flash-models` |
 | Streaming | Supported through server-sent events when the selected upstream supports it |
+| Sticky caller header | `x-ai-usage-instance: writer-1`, with a different stable ID per app instance |
 
 If a client asks for the complete chat endpoint instead of a base URL, use `http://127.0.0.1:43129/v1/chat/completions`. Do not append `/v1` twice. A Responses-only or Anthropic Messages-only client cannot use this API directly. Embeddings, image/music/audio generation and native agent execution are outside this API.
 
@@ -229,7 +255,10 @@ Create the `flash-models` pool and enable the router first. This example prompts
 $usageBaseUrl = 'http://127.0.0.1:43129/v1'
 $usageClientKey = Read-Host 'Paste the AI Usage client key' -AsSecureString
 $usageCredential = [PSCredential]::new('client', $usageClientKey)
-$usageHeaders = @{ Authorization = 'Bearer ' + $usageCredential.GetNetworkCredential().Password }
+$usageHeaders = @{
+    Authorization = 'Bearer ' + $usageCredential.GetNetworkCredential().Password
+    'x-ai-usage-instance' = 'writer-1'
+}
 
 try {
     $usageModels = Invoke-RestMethod -Uri "$usageBaseUrl/models" -Headers $usageHeaders -ErrorAction Stop
@@ -252,7 +281,7 @@ finally {
 }
 ```
 
-For a streaming client, use the same endpoint with `"stream": true` and consume the SSE stream. Send an optional `x-ai-usage-session` header containing a stable opaque conversation ID (1-200 letters, numbers, underscores or hyphens). `x-opencode-session` is also accepted. Without one, the router creates an ID for that request. Only Go receives this session metadata; arbitrary caller headers are not forwarded. Successful responses include `x-ai-usage-account`, `x-ai-usage-requested-model`, `x-ai-usage-model` and `x-ai-usage-upstream-model` headers so a client can identify the selected account and model. The response body's model is the requested pool name, including in streaming chunks.
+For a streaming client, use the same endpoint with `"stream": true` and consume the SSE stream. Send an optional `x-ai-usage-session` header containing a stable opaque conversation ID (1-200 letters, numbers, underscores or hyphens). `x-opencode-session` is also accepted. Without one, the router creates an ID for that request. For load-distribution pools, an explicit `x-ai-usage-instance` takes priority over this session ID for stickiness. Only Go receives session metadata; instance IDs and arbitrary caller headers are not forwarded. Successful responses include `x-ai-usage-account`, `x-ai-usage-requested-model`, `x-ai-usage-model` and `x-ai-usage-upstream-model` headers so a client can identify the selected account and model. The response body's model is the requested pool name, including in streaming chunks. `x-ai-usage-route-mode` is `failover` or `loadDistribution`; `x-ai-usage-selection` is `failover`, `distributed` or `sticky`. The model catalog also includes a `routing_mode` extension field.
 
 The [HTML routing guide](docs/ROUTING.html) has the complete supported request fields, error contract, limits, selection rules and provider extension interface. GitHub displays HTML as source; download or clone it and open `docs/ROUTING.html` in a browser for the formatted guide.
 
@@ -262,7 +291,7 @@ Configuration is stored at `%LOCALAPPDATA%\com.aiusagetray.desktop\settings.json
 
 Provider/server keys and the router client key are stored as generic credentials in **Windows Credential Manager**, private to the current Windows account, with target names starting `com.aiusagetray.desktop/`. Keys are sent from the local password field to native code for storage, never saved in settings JSON or returned to the frontend. A blank password field preserves the saved key; entering a replacement updates it. Native cloud usage reads use HTTPS. Local model connections may use HTTP on loopback or a private LAN. Requests reject redirects, honor cancellation, and have time and size limits.
 
-The router forwards your prompt to the selected provider or local server. AI Usage does not log or persist prompts or responses; the selected server or provider has its own data handling. Ordinary settings contain account labels, nonsecret connection options, model pools and their ordered account/model entries.
+The router forwards your prompt to the selected provider or local server. AI Usage does not log or persist prompts or responses; the selected server or provider has its own data handling. Ordinary settings contain account labels, nonsecret connection options, model pools, each pool's route type and its account/model entries.
 
 Source and installer builds do not include those local profiles or existing Codex credentials. Each recipient connects their own accounts. Distribute the source or generated installer, never a copy of the app's runtime data directory.
 
@@ -303,7 +332,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 
 The build script prepares a local test-temp directory, runs frontend tests, Rust tests and Clippy, then builds the production frontend and NSIS installer. The default outputs for this version are:
 
-- `src-tauri/target/release/bundle/nsis/AI Usage_0.6.1_x64-setup.exe`, the installer to distribute.
+- `src-tauri/target/release/bundle/nsis/AI Usage_0.7.0_x64-setup.exe`, the installer to distribute.
 - `src-tauri/target/release/ai-usage-tray.exe`, the app executable you can run directly.
 
 If `CARGO_TARGET_DIR` is set, the native outputs are under that directory instead. Build outputs, dependencies and account data are ignored by Git. Building the installer does not run it.

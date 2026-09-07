@@ -212,6 +212,7 @@ async fn engine(server: &Server, clock: Arc<AtomicI64>) -> Arc<RouterEngine> {
             RouterSettings {
                 enabled: true,
                 pools: vec![ModelPool {
+                    mode: Default::default(),
                     name: MODEL.into(),
                     members: ["go", "cloud"]
                         .into_iter()
@@ -347,6 +348,7 @@ async fn unknown_allowance_unknown_models_and_disabled_accounts_never_generate()
             RouterSettings {
                 enabled: true,
                 pools: vec![ModelPool {
+                    mode: Default::default(),
                     name: MODEL.into(),
                     members: vec![PoolMember {
                         account_id: "go".into(),
@@ -370,6 +372,7 @@ async fn unknown_allowance_unknown_models_and_disabled_accounts_never_generate()
             RouterSettings {
                 enabled: true,
                 pools: vec![ModelPool {
+                    mode: Default::default(),
                     name: MODEL.into(),
                     members: vec![PoolMember {
                         account_id: "go".into(),
@@ -391,6 +394,7 @@ async fn unknown_allowance_unknown_models_and_disabled_accounts_never_generate()
             RouterSettings {
                 enabled: true,
                 pools: vec![ModelPool {
+                    mode: Default::default(),
                     name: MODEL.into(),
                     members: vec![PoolMember {
                         account_id: "go".into(),

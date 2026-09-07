@@ -1,6 +1,7 @@
 use super::{
     catalog::{self, CatalogContext, ModelCatalog, ModelLibrary},
-    config::RouterSettings,
+    config::{RouteMode, RouterSettings},
+    distribution::LoadDistribution,
     metadata::InferenceModel,
     reports::{RequestStatus, RequestTrace, RouteTarget, RoutingReport, RoutingReports},
 };
@@ -81,6 +82,12 @@ struct Configuration {
     settings: RouterSettings,
     accounts: Vec<RouteAccount>,
     cancelled: CancellationToken,
+    distribution: Arc<LoadDistribution>,
+}
+
+struct CallerIdentity {
+    session: String,
+    affinity: Option<String>,
 }
 
 pub struct RouterEngine {
@@ -101,10 +108,9 @@ impl RouterEngine {
                 settings: Default::default(),
                 accounts: vec![],
                 cancelled: CancellationToken::new(),
+                distribution: Arc::new(LoadDistribution::default()),
             }),
-            client: reqwest::Client::builder()
-                .no_proxy()
-                .redirect(reqwest::redirect::Policy::none())
+            client: super::network::client_builder()
                 .connect_timeout(Duration::from_secs(5))
                 .timeout(Duration::from_secs(180))
                 .build()
@@ -136,6 +142,7 @@ impl RouterEngine {
             settings,
             accounts,
             cancelled: CancellationToken::new(),
+            distribution: Arc::new(LoadDistribution::default()),
         };
         self.cooldowns.lock().await.clear();
     }
@@ -167,7 +174,7 @@ impl RouterEngine {
     pub async fn model_list(&self) -> Result<Value, String> {
         let library = self.model_library(false).await?;
         Ok(
-            json!({"object":"list","data":library.pools.into_iter().filter(|p| p.available && !p.pool.members.is_empty()).map(|p| json!({"id":p.pool.name,"object":"model","created":0,"owned_by":"ai-usage","context_length":p.limits.context,"max_output_tokens":p.limits.output,"limit":p.limits})).collect::<Vec<_>>()}),
+            json!({"object":"list","data":library.pools.into_iter().filter(|p| p.available && !p.pool.members.is_empty()).map(|p| json!({"id":p.pool.name,"object":"model","created":0,"owned_by":"ai-usage","routing_mode":p.pool.mode,"context_length":p.limits.context,"max_output_tokens":p.limits.output,"limit":p.limits})).collect::<Vec<_>>()}),
         )
     }
     pub async fn cancel_requests(&self) {
@@ -192,6 +199,20 @@ impl RouterEngine {
         request: Value,
         session: Option<&str>,
     ) -> Response {
+        self.route_with_identity(request, session, None).await
+    }
+
+    pub async fn route_with_identity(
+        self: &Arc<Self>,
+        request: Value,
+        session: Option<&str>,
+        instance: Option<&str>,
+    ) -> Response {
+        let caller = match instance {
+            Some(value) if valid_session(value) => Some(format!("instance:{value}")),
+            Some(_) => return error(StatusCode::BAD_REQUEST, "invalid_instance", "Use an opaque instance ID of at most 200 letters, numbers, underscores or hyphens."),
+            None => session.map(|value| format!("session:{value}")),
+        };
         let requested = match validate_request(&request) {
             Ok(model) => model.to_owned(),
             Err(message) => return error(StatusCode::BAD_REQUEST, "invalid_request", message),
@@ -245,7 +266,16 @@ impl RouterEngine {
         let request_id = started.id().to_owned();
         let mut trace = Some(started);
         let mut response = self
-            .route_tracked(request, session, config, permit, &mut trace)
+            .route_tracked(
+                request,
+                CallerIdentity {
+                    session,
+                    affinity: caller,
+                },
+                config,
+                permit,
+                &mut trace,
+            )
             .await;
         if let Some(trace) = trace {
             let status = response.status().as_u16();
@@ -271,7 +301,7 @@ impl RouterEngine {
     async fn route_tracked(
         self: &Arc<Self>,
         request: Value,
-        session: String,
+        identity: CallerIdentity,
         config: Configuration,
         permit: tokio::sync::OwnedSemaphorePermit,
         trace: &mut Option<RequestTrace>,
@@ -309,7 +339,55 @@ impl RouterEngine {
                 "This model pool is empty. Add provider models on the Models page, then save.",
             );
         }
-        for (index, member) in pool.members.iter().enumerate() {
+        let mut remaining = (0..pool.members.len()).collect::<Vec<_>>();
+        let mut tried = 0;
+        while !remaining.is_empty() {
+            if config.cancelled.is_cancelled() {
+                return cancelled_response();
+            }
+            let candidates = if pool.mode == RouteMode::LoadDistribution {
+                let now = (self.clock)();
+                let cooldowns = self.cooldowns.lock().await;
+                remaining
+                    .iter()
+                    .copied()
+                    .filter(|index| {
+                        let member = &pool.members[*index];
+                        config.accounts.iter().any(|account| {
+                            account.id == member.account_id
+                                && catalog::account_issue(account).is_none()
+                        }) && ![&member.model, &String::new()].into_iter().any(|model| {
+                            cooldowns
+                                .get(&(member.account_id.clone(), model.clone()))
+                                .is_some_and(|until| *until > now)
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                vec![remaining[0]]
+            };
+            let assignment =
+                config
+                    .distribution
+                    .reserve(&pool, identity.affinity.as_deref(), &candidates);
+            let index = assignment
+                .as_ref()
+                .map_or(remaining[0], |value| value.index);
+            let sticky = assignment.as_ref().is_some_and(|value| value.sticky);
+            let selection = if pool.mode == RouteMode::Failover {
+                "failover"
+            } else if sticky {
+                "sticky"
+            } else {
+                "distributed"
+            };
+            remaining.retain(|candidate| *candidate != index);
+            let member = &pool.members[index];
+            trace
+                .as_ref()
+                .expect("Active report")
+                .selection(pool.mode, tried);
+            tried += 1;
             let mut target = RouteTarget {
                 account_id: member.account_id.clone(),
                 account_label: String::new(),
@@ -415,7 +493,7 @@ impl RouterEngine {
                 secrets: self.secrets.as_ref(),
                 client: &self.client,
                 now,
-                session_id: Some(&session),
+                session_id: Some(&identity.session),
             };
             trace.as_ref().expect("Active report").progress(
                 target.clone(),
@@ -452,7 +530,13 @@ impl RouterEngine {
                     trace.as_ref().expect("Active report").attempt(
                         target.clone(),
                         "selected",
-                        "Provider accepted the request.",
+                        if pool.mode == RouteMode::Failover {
+                            "Provider accepted the request."
+                        } else if sticky {
+                            "Kept this caller on its assigned server."
+                        } else {
+                            "Assigned an available server by current load and caller distribution."
+                        },
                         None,
                     );
                     let stream = request["stream"].as_bool().unwrap_or(false);
@@ -482,7 +566,7 @@ impl RouterEngine {
                         // The worker owns upstream I/O and permits so cancellation also
                         // releases them when a downstream client stops reading.
                         tokio::spawn(async move {
-                            let (_serial, _permit) = (serial, permit);
+                            let (_serial, _permit, _assignment) = (serial, permit, assignment);
                             let mut aliases = super::stream::AliasStream::default();
                             loop {
                                 let result = tokio::select! {
@@ -541,6 +625,11 @@ impl RouterEngine {
                     };
                     let headers = output.headers_mut();
                     headers.insert("cache-control", HeaderValue::from_static("no-store"));
+                    headers.insert(
+                        "x-ai-usage-route-mode",
+                        HeaderValue::from_static(pool.mode.as_str()),
+                    );
+                    headers.insert("x-ai-usage-selection", HeaderValue::from_static(selection));
                     for (name, value) in [
                         ("x-ai-usage-account", &account.id),
                         ("x-ai-usage-model", &requested),

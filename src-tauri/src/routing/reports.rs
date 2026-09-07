@@ -1,4 +1,5 @@
 //! Bounded, in-memory routing metadata. Never accept request/response bodies or keys.
+use super::config::RouteMode;
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -46,6 +47,7 @@ pub struct RouteAttempt {
 pub struct RequestReport {
     pub id: String,
     pub pool: String,
+    pub mode: RouteMode,
     pub started_at: i64,
     pub finished_at: Option<i64>,
     pub duration_ms: u64,
@@ -122,6 +124,7 @@ impl RoutingReports {
                 report: RequestReport {
                     id: id.clone(),
                     pool,
+                    mode: RouteMode::Failover,
                     started_at: chrono::Utc::now().timestamp(),
                     finished_at: None,
                     duration_ms: 0,
@@ -160,9 +163,17 @@ impl RequestTrace {
             change(&mut active.report);
         }
     }
+    pub fn selection(&self, mode: RouteMode, previous_attempts: usize) {
+        self.update(|report| {
+            report.mode = mode;
+            report.fallback_count = previous_attempts;
+        });
+    }
     pub fn progress(&self, target: RouteTarget, status: RequestStatus, message: &'static str) {
         self.update(|report| {
-            report.fallback_count = target.position.saturating_sub(1);
+            if report.mode == RouteMode::Failover {
+                report.fallback_count = target.position.saturating_sub(1);
+            }
             report.target = Some(target);
             report.status = status;
             report.message = message;
@@ -176,7 +187,9 @@ impl RequestTrace {
         retry_at: Option<i64>,
     ) {
         self.update(|report| {
-            report.fallback_count = target.position.saturating_sub(1);
+            if report.mode == RouteMode::Failover {
+                report.fallback_count = target.position.saturating_sub(1);
+            }
             if outcome == "skipped" {
                 report.target = None;
             }

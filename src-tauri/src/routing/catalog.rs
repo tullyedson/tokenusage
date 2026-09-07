@@ -208,6 +208,7 @@ pub fn library(
                 .entry(model.id.clone())
                 .or_insert_with(|| AvailablePool {
                     pool: ModelPool {
+                        mode: Default::default(),
                         name: model.id.clone(),
                         members: vec![],
                     },
@@ -398,6 +399,7 @@ mod tests {
         let automatic = library(&[], reports.clone(), &[]);
         assert_eq!(automatic.pools[0].pool.members.len(), 2);
         let custom = ModelPool {
+            mode: Default::default(),
             name: "glm".into(),
             members: vec![
                 PoolMember {
@@ -450,6 +452,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let pool = ModelPool {
+            mode: crate::routing::config::RouteMode::LoadDistribution,
             name: "arbitrary-chain".into(),
             members: accounts
                 .iter()

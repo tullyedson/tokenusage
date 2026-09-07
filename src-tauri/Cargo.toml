@@ -1,6 +1,6 @@
 [package]
 name = "ai-usage-tray"
-version = "0.6.1"
+version = "0.7.0"
 description = "Private AI account usage at a glance in the Windows system tray"
 edition = "2021"
 rust-version = "1.85"

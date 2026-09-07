@@ -1,12 +1,27 @@
 # Verification record
 
+## Version 0.7.0 sticky load distribution
+
+On September 7, 2026, 72 Rust tests and 35 frontend tests passed, along with strict Clippy, TypeScript/Vite and the Windows NSIS build. New regressions cover distributed sequential callers, sticky repeated callers, instance IDs taking precedence over sessions, anonymous request rotation, simultaneous streams on three servers, queued cancellation, stream disconnect, configuration replacement, safe preflight fallback, quota failure, and no replay after ambiguous submission. Existing ordered failover and reset recovery still pass. Selecting a later entry for distribution is not itself reported as fallback.
+
+Affinity is capped at 4,096 caller/pool pairs with a 30-minute idle lifetime. Tests cover expiry, eviction, active-pair retention and cleanup isolated to the cancelled configuration. Model capacity remains the minimum across enabled members in both modes, including unknown/stale/disabled metadata behavior. The shared .local resolver rejects empty, public, mixed and mapped-public answers and returns the exact checked addresses to the connection. Provider reads and inference use this guarded client; no credentials or arbitrary caller headers are forwarded as affinity data.
+
+Frontend tests verify mode changes survive navigation and save, can return to failover, and appear correctly in Reports. The populated Models page with Load distribution selected was inspected in an isolated hidden Edge browser at 1,120 pixels. No native desktop interaction was used. NSIS integrity and product version 0.7.0 pass; the packaged executable differs from the optimized build only in Tauri's three-byte UNK-to-NSS marker.
+
+
+The 0.7.0 installer was applied silently while the router had no active client connections. The installed executable exactly matches the verified package, and startup preferences are unchanged. An explicit local setup preserved existing accounts and effective route order while migrating the owner's version 2 settings to version 3 and adding a three-server local Ollama pool named `gemma4` in load-distribution mode. No keys were created or rotated; the pre-change settings backup stays in the app data directory outside source control.
+
+Live verification through the installed authenticated router sent three concurrent, neutral callers to three different local servers. A second request from each caller selected its original server with a sticky response header. A further streaming request preserved the common model name, delivered visible text and completed across 67 SSE events. All 46 previous model names remain available; the catalog now has 48. GLM retains its 1,000,000 context limit and the OpenCode auth file is unchanged. The first 64-token smoke-test budget ended before Gemma produced visible text; repeating with a 512-token maximum obtained text without an app change. These were local requests only, with no cloud generation or real quota depletion.
+
+The Gemma servers report a 262,144-token trained maximum but no explicit model num_ctx. The route therefore correctly advertises unknown configured context/input/output bounds, rather than claiming a verified serving capacity. No server settings or models were modified. Server outage/reset and interrupted-stream no-replay behavior remain covered by fixtures; the live servers were not stopped to test failure. Native pointer interactions and report controls remain covered by DOM/command tests rather than desktop control.
+
 ## Version 0.6.1 model context metadata
 
 On September 7, 2026, all 57 native tests and 33 frontend tests passed, along with strict Clippy, TypeScript/Vite and the Windows NSIS build. Metadata regressions cover Go/cloud GLM's 1,000,000-token chain, different-context fallbacks, unknown/stale/missing/disabled members, server-versus-trained limits, malformed numbers, exact provider matching, credential-free public caching and replacing OpenCode's old 128k configuration. HTTP tests accept a 2 MiB fictional request through routing and reject a body above 16 MiB. No real long-context generation or quota depletion was performed.
 
 Read-only public verification found GLM-5.3-Flash in both providers' current catalogs. OpenCode's Models.dev Go entry supplies 1,000,000 context and 131,072 output; Ollama's /api/show reports 1,048,576 context and its exact Models.dev entry supplies 131,072 output. No provider credentials or prompts were sent for this public research. The Models page, including its chain-limit summary, was inspected in an isolated hidden browser.
 
-The 0.6.1 installer passes archive integrity and product-version checks. Full executable comparison permits only Tauri's three-byte UNK-to-NSS installer marker. Local upgrade and the actual OpenCode import check are pending an idle router or authorization to interrupt its open client connection.
+The 0.6.1 installer passes archive integrity and product-version checks. Full executable comparison permits only Tauri's three-byte UNK-to-NSS installer marker. The update was installed while the router was idle on September 7, preserving settings and startup preferences. The running payload matched the installer, and both the live router and a fresh OpenCode 1.18.29 process listed 46 models. GLM passed through with 1,000,000 context and 131,072 output. The installed project plugin was updated and its obsolete GLM limit removed; the auth file was unchanged.
 
 
 ## Version 0.6.0 routing reports
@@ -98,6 +113,6 @@ These require the user's account sign-ins or an uninterrupted desktop session:
 - OpenRouter management-key account credits and standard-key allowances against a real account, including key replacement and Forget in the installed app.
 - OpenCode Go website session persistence and expired-session recovery. Native key authentication, all three allowance windows and included-plan generation were exercised as recorded above. Zen wallet balances are outside the current OpenCode connection.
 - Installer UI, uninstall UI and optional Windows startup after an actual install.
-- Pool drag/drop in the native window, OpenRouter free-model generation, local Ollama generation and real caller disconnect behavior. Local vLLM generation, streaming tool calls, silent installation, router restart and OpenCode model import passed as recorded above. Quota exhaustion/reset and disconnect/cancellation paths use local HTTP fixtures.
+- Pool drag/drop in the native window, OpenRouter free-model generation, real caller disconnect behavior. Local Ollama and vLLM generation, streaming tool calls, silent installation, router restart and OpenCode model import passed as recorded above. Quota exhaustion/reset and disconnect/cancellation paths use local HTTP fixtures.
 
 Building an installer alone does not install it or change Windows startup settings. The separate silent upgrades and their verified scope are recorded above; interactive installation and uninstall UI remain user-controlled checks.

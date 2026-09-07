@@ -54,3 +54,5 @@
 .report-privacy{font-size:11px;line-height:1.8;color:#899b7f;margin:24px 0}
 @media(max-width:720px){.report-stats{gap:7px}.report-stat{padding:15px 12px}.report-active-grid{grid-template-columns:1fr}.request-report>summary{grid-template-columns:60px minmax(0,1fr) auto;gap:9px;padding:13px}.report-chevron{display:none}.request-result small{font-size:9px}.report-request-time{font-size:10px}}
 @media(max-width:480px){.report-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.report-filters{grid-template-columns:1fr}.request-report>summary{grid-template-columns:minmax(0,1fr) auto}.report-request-time{grid-column:1/-1;display:flex;gap:8px}.report-request-time small{margin:0}.report-section-heading{align-items:flex-start}}
+
+.report-route-type{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:5px}

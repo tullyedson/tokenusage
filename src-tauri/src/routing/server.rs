@@ -162,7 +162,14 @@ async fn models(State(state): State<HttpState>, headers: HeaderMap) -> Response 
     if !authorized(&state, &headers) {
         return error(StatusCode::UNAUTHORIZED, "unauthorized", "A valid local client key and loopback Host are required. Browser origins are not accepted.");
     }
-    Json(state.engine.model_list().await).into_response()
+    match state.engine.model_list().await {
+        Ok(models) => Json(models).into_response(),
+        Err(_) => error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "configuration_changed",
+            "Settings changed while discovering models. Retry the model list.",
+        ),
+    }
 }
 async fn chat(
     State(state): State<HttpState>,

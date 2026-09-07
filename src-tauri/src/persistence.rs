@@ -6,19 +6,14 @@ pub fn load(path: &Path) -> Result<Settings, String> {
         return Ok(Settings::default());
     }
     let data = fs::read(path).map_err(|_| "Could not read saved settings.")?;
-    let mut settings: Settings = serde_json::from_slice(&data)
+    let value = serde_json::from_slice(&data)
         .map_err(|_| "Saved settings are damaged. The original file was preserved.")?;
-    if !matches!(settings.version, 1 | 2) {
-        return Err("These settings were saved by a different app version. The original file was preserved.".into());
-    }
-    // Keep legacy account IDs intact: vault targets and browser profiles use them.
-    settings.version = 2;
+    let settings = crate::routing::migration::from_value(value)?;
     if settings.providers.len() > 64
         || settings.providers.iter().any(|(id, config)| {
             !crate::routing::config::valid_account(id)
                 || (!config.provider_type.is_empty()
                     && !crate::routing::config::valid_account(&config.provider_type))
-                || crate::routing::config::validate_account(&config.routing).is_err()
         })
     {
         return Err("Saved accounts are invalid. The original file was preserved.".into());
@@ -82,13 +77,13 @@ mod tests {
         let original = br#"{"version":1,"refreshMinutes":5,"providers":{"openrouter":{"enabled":true,"fields":{"connection":"key"},"sessionGeneration":7,"revision":2}}}"#;
         fs::write(&path, original).unwrap();
         let settings = load(&path).unwrap();
-        assert_eq!(settings.version, 2);
+        assert_eq!(settings.version, 3);
         assert!(!settings.routing.enabled);
         let account = &settings.providers["openrouter"];
         assert_eq!(account.provider_type("openrouter"), "openrouter");
         assert_eq!(account.session_generation, 7);
         assert_eq!(account.revision, 2);
-        assert!(!account.routing.enabled);
+        assert!(account.routing.enabled);
         assert_eq!(fs::read(&path).unwrap(), original);
     }
     #[test]

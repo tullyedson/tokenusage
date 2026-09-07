@@ -1,4 +1,7 @@
-use super::config::{model_order, RouterSettings};
+use super::{
+    catalog::{self, CatalogContext, ModelCatalog, ModelLibrary},
+    config::RouterSettings,
+};
 use crate::{credentials::ISecretStore, model::ProviderConfig};
 use async_trait::async_trait;
 use axum::{
@@ -85,6 +88,7 @@ pub struct RouterEngine {
     cooldowns: Mutex<BTreeMap<(String, String), i64>>,
     concurrency: Arc<Semaphore>,
     clock: Arc<dyn Fn() -> i64 + Send + Sync>,
+    catalog: ModelCatalog,
 }
 
 impl RouterEngine {
@@ -106,6 +110,7 @@ impl RouterEngine {
             cooldowns: Mutex::new(BTreeMap::new()),
             concurrency: Arc::new(Semaphore::new(8)),
             clock: Arc::new(|| chrono::Utc::now().timestamp()),
+            catalog: ModelCatalog::default(),
         }
     }
     #[cfg(test)]
@@ -123,13 +128,6 @@ impl RouterEngine {
                 account.serial = old.serial.clone();
             }
         }
-        accounts.sort_by_key(|a| {
-            settings
-                .account_order
-                .iter()
-                .position(|id| id == &a.id)
-                .unwrap_or(usize::MAX)
-        });
         *config = Configuration {
             settings,
             accounts,
@@ -138,18 +136,35 @@ impl RouterEngine {
         self.cooldowns.lock().await.clear();
     }
 
-    pub async fn model_list(&self) -> Value {
-        let config = self.config.read().await;
-        let mut names = std::collections::BTreeSet::new();
-        for account in &config.accounts {
-            for mapping in &account.config.routing.models {
-                names.insert(mapping.model.clone());
-            }
+    pub async fn model_library(&self, force: bool) -> Result<ModelLibrary, String> {
+        let config = self.config.read().await.clone();
+        let catalogs = self
+            .catalog
+            .read(
+                CatalogContext {
+                    accounts: &config.accounts,
+                    secrets: self.secrets.as_ref(),
+                    client: &self.client,
+                    cancelled: &config.cancelled,
+                    now: (self.clock)(),
+                },
+                force,
+            )
+            .await?;
+        if config.cancelled.is_cancelled() {
+            return Err("Account settings changed. Refresh models again.".into());
         }
-        for rule in &config.settings.fallbacks {
-            names.insert(rule.model.clone());
-        }
-        json!({"object":"list","data":names.into_iter().map(|id| json!({"id":id,"object":"model","created":0,"owned_by":"ai-usage"})).collect::<Vec<_>>()})
+        Ok(catalog::library(
+            &config.accounts,
+            catalogs,
+            &config.settings.pools,
+        ))
+    }
+    pub async fn model_list(&self) -> Result<Value, String> {
+        let library = self.model_library(false).await?;
+        Ok(
+            json!({"object":"list","data":library.pools.into_iter().filter(|p| p.available && !p.pool.members.is_empty()).map(|p| json!({"id":p.pool.name,"object":"model","created":0,"owned_by":"ai-usage"})).collect::<Vec<_>>()}),
+        )
     }
     pub async fn cancel_requests(&self) {
         self.config.read().await.cancelled.cancel();
@@ -218,194 +233,234 @@ impl RouterEngine {
         let mut next_retry = None;
         let deadline = tokio::time::sleep(Duration::from_secs(180));
         tokio::pin!(deadline);
-        for model in model_order(&requested, &config.settings.fallbacks) {
-            for account in &config.accounts {
-                let Some(mapping) = account
-                    .config
-                    .routing
-                    .models
-                    .iter()
-                    .find(|m| m.model == model)
-                else {
-                    continue;
-                };
-                let now = (self.clock)();
-                let cooldown = {
-                    let cooldowns = self.cooldowns.lock().await;
-                    [
-                        cooldowns.get(&(account.id.clone(), mapping.upstream.clone())),
-                        cooldowns.get(&(account.id.clone(), String::new())),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .copied()
-                    .max()
-                    .filter(|until| *until > now)
-                };
-                if let Some(until) = cooldown {
-                    next_retry = Some(next_retry.map_or(until, |old: i64| old.min(until)));
-                    continue;
-                }
-                let cancelled = &config.cancelled;
-                let serial = tokio::select! {
+        let pool = if let Some(pool) = config
+            .settings
+            .pools
+            .iter()
+            .find(|pool| pool.name == requested)
+        {
+            pool.clone()
+        } else {
+            let library = tokio::select! {
+                _ = config.cancelled.cancelled() => return cancelled_response(),
+                _ = &mut deadline => return error(StatusCode::GATEWAY_TIMEOUT, "timeout", "Model discovery timed out."),
+                result = self.model_library(false) => match result { Ok(library) => library, Err(_) => return cancelled_response() },
+            };
+            match library.pools.into_iter().find(|pool| pool.pool.name == requested) {
+                Some(pool) => pool.pool,
+                None => return error(StatusCode::NOT_FOUND, "model_not_found", "No model or pool has this name. Open Models in AI Usage and refresh the provider catalogs."),
+            }
+        };
+        if pool.members.is_empty() {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "empty_pool",
+                "This model pool is empty. Add provider models on the Models page, then save.",
+            );
+        }
+        for member in &pool.members {
+            let Some(account) = config
+                .accounts
+                .iter()
+                .find(|account| account.id == member.account_id)
+            else {
+                reasons.push(json!({"account":member.account_id,"model":member.model,"reason":"Account is not connected for routing. Open Settings."}));
+                continue;
+            };
+            if let Some(reason) = catalog::account_issue(account) {
+                reasons.push(json!({"account":account.id,"model":member.model,"reason":reason}));
+                continue;
+            }
+            let now = (self.clock)();
+            let cooldown = {
+                let cooldowns = self.cooldowns.lock().await;
+                [
+                    cooldowns.get(&(account.id.clone(), member.model.clone())),
+                    cooldowns.get(&(account.id.clone(), String::new())),
+                ]
+                .into_iter()
+                .flatten()
+                .copied()
+                .max()
+                .filter(|until| *until > now)
+            };
+            if let Some(until) = cooldown {
+                next_retry = Some(next_retry.map_or(until, |old: i64| old.min(until)));
+                reasons.push(json!({"account":account.id,"model":member.model,"reason":"Waiting for the next quota or availability check.","retry_at":until}));
+                continue;
+            }
+            let cancelled = &config.cancelled;
+            let serial = tokio::select! {
+                biased;
+                _ = cancelled.cancelled() => return cancelled_response(),
+                _ = &mut deadline => return error(StatusCode::GATEWAY_TIMEOUT, "timeout", "Routing timed out."),
+                lock = account.serial.clone().lock_owned() => lock,
+            };
+            // A preceding request might have exhausted the account while this one waited.
+            let now = (self.clock)();
+            let blocked = self
+                .cooldowns
+                .lock()
+                .await
+                .iter()
+                .filter(|((id, m), until)| {
+                    id == &account.id && (m.is_empty() || m == &member.model) && **until > now
+                })
+                .map(|(_, until)| *until)
+                .max();
+            if let Some(until) = blocked {
+                next_retry = Some(next_retry.map_or(until, |old: i64| old.min(until)));
+                reasons.push(json!({"account":account.id,"model":member.model,"reason":"A preceding request reached this account's limit.","retry_at":until}));
+                continue;
+            }
+            let context = InferenceContext {
+                account_id: &account.id,
+                config: &account.config,
+                secrets: self.secrets.as_ref(),
+                client: &self.client,
+                now,
+                session_id: Some(&session),
+            };
+            let prepared = tokio::select! {
+                biased;
+                _ = cancelled.cancelled() => return cancelled_response(),
+                _ = &mut deadline => return error(StatusCode::GATEWAY_TIMEOUT, "timeout", "Routing timed out."),
+                result = account.provider.prepare(&context, &request, &member.model) => result,
+            };
+            let result = match prepared {
+                Ok(prepared) => tokio::select! {
                     biased;
                     _ = cancelled.cancelled() => return cancelled_response(),
                     _ = &mut deadline => return error(StatusCode::GATEWAY_TIMEOUT, "timeout", "Routing timed out."),
-                    lock = account.serial.clone().lock_owned() => lock,
-                };
-                // A preceding request might have exhausted the account while this one waited.
-                let now = (self.clock)();
-                let blocked = self
-                    .cooldowns
-                    .lock()
-                    .await
-                    .iter()
-                    .filter(|((id, m), until)| {
-                        id == &account.id
-                            && (m.is_empty() || m == &mapping.upstream)
-                            && **until > now
-                    })
-                    .map(|(_, until)| *until)
-                    .max();
-                if let Some(until) = blocked {
-                    next_retry = Some(next_retry.map_or(until, |old: i64| old.min(until)));
-                    continue;
-                }
-                let context = InferenceContext {
-                    account_id: &account.id,
-                    config: &account.config,
-                    secrets: self.secrets.as_ref(),
-                    client: &self.client,
-                    now,
-                    session_id: Some(&session),
-                };
-                let prepared = tokio::select! {
-                    biased;
-                    _ = cancelled.cancelled() => return cancelled_response(),
-                    _ = &mut deadline => return error(StatusCode::GATEWAY_TIMEOUT, "timeout", "Routing timed out."),
-                    result = account.provider.prepare(&context, &request, &mapping.upstream) => result,
-                };
-                let result = match prepared {
-                    Ok(prepared) => tokio::select! {
-                        biased;
-                        _ = cancelled.cancelled() => return cancelled_response(),
-                        _ = &mut deadline => return error(StatusCode::GATEWAY_TIMEOUT, "timeout", "Routing timed out."),
-                        result = send(&self.client, prepared, (self.clock)()) => result,
-                    },
-                    Err(failure) => Err(failure),
-                };
-                match result {
-                    Ok(mut response) => {
-                        if cancelled.is_cancelled() {
-                            return cancelled_response();
-                        }
-                        let stream = request["stream"].as_bool().unwrap_or(false);
-                        let content_type = response
-                            .headers()
-                            .get("content-type")
-                            .and_then(|v| v.to_str().ok())
-                            .unwrap_or("");
-                        if stream && !content_type.starts_with("text/event-stream") {
-                            return error(
-                                StatusCode::BAD_GATEWAY,
-                                "invalid_upstream",
-                                "The selected server did not return an event stream.",
-                            );
-                        }
-                        let mut output = if stream {
-                            let cancel = cancelled.clone();
-                            let (sender, receiver) =
-                                tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(4);
-                            // The worker owns upstream I/O and permits so cancellation also
-                            // releases them when a downstream client stops reading.
-                            tokio::spawn(async move {
-                                let (_serial, _permit) = (serial, permit);
-                                loop {
-                                    let result = tokio::select! {
-                                        _ = cancel.cancelled() => { let _ = sender.try_send(Err(std::io::Error::other("Routing configuration changed."))); return; },
-                                        _ = sender.closed() => return,
-                                        result = response.chunk() => result,
-                                    };
-                                    let item = match result {
-                                        Ok(Some(bytes)) => Ok(bytes),
-                                        Ok(None) => return,
-                                        Err(_) => {
-                                            let _ = sender.try_send(Err(std::io::Error::other("Upstream stream interrupted; request was not replayed.")));
-                                            return;
-                                        }
-                                    };
-                                    tokio::select! {
-                                        _ = cancel.cancelled() => { let _ = sender.try_send(Err(std::io::Error::other("Routing configuration changed."))); return; },
-                                        result = sender.send(item) => if result.is_err() { return; },
+                    result = send(&self.client, prepared, (self.clock)()) => result,
+                },
+                Err(failure) => Err(failure),
+            };
+            match result {
+                Ok(mut response) => {
+                    if cancelled.is_cancelled() {
+                        return cancelled_response();
+                    }
+                    let stream = request["stream"].as_bool().unwrap_or(false);
+                    let content_type = response
+                        .headers()
+                        .get("content-type")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    if stream && !content_type.starts_with("text/event-stream") {
+                        return error(
+                            StatusCode::BAD_GATEWAY,
+                            "invalid_upstream",
+                            "The selected server did not return an event stream.",
+                        );
+                    }
+                    let mut output = if stream {
+                        let cancel = cancelled.clone();
+                        let alias = requested.clone();
+                        let (sender, receiver) =
+                            tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(4);
+                        // The worker owns upstream I/O and permits so cancellation also
+                        // releases them when a downstream client stops reading.
+                        tokio::spawn(async move {
+                            let (_serial, _permit) = (serial, permit);
+                            let mut aliases = super::stream::AliasStream::default();
+                            loop {
+                                let result = tokio::select! {
+                                    _ = cancel.cancelled() => { let _ = sender.try_send(Err(std::io::Error::other("Routing configuration changed."))); return; },
+                                    _ = sender.closed() => return,
+                                    result = response.chunk() => result,
+                                };
+                                let finished = matches!(result, Ok(None));
+                                let item = match result {
+                                    Ok(Some(bytes)) => {
+                                        aliases.push(&bytes, &alias).map(Bytes::from)
                                     }
+                                    Ok(None) => {
+                                        Ok(Bytes::from(std::mem::take(&mut aliases).finish(&alias)))
+                                    }
+                                    Err(_) => {
+                                        let _ = sender.try_send(Err(std::io::Error::other("Upstream stream interrupted; request was not replayed.")));
+                                        return;
+                                    }
+                                };
+                                let failed = item.is_err();
+                                if item.as_ref().is_ok_and(Bytes::is_empty) && !finished {
+                                    continue;
                                 }
-                            });
-                            let chunks =
-                                futures_util::stream::unfold(receiver, |mut receiver| async {
-                                    receiver.recv().await.map(|item| (item, receiver))
-                                });
-                            Response::builder()
-                                .status(200)
-                                .header("content-type", "text/event-stream")
-                                .body(Body::from_stream(chunks))
-                                .expect("Static response headers")
-                        } else {
-                            let body = tokio::select! { _ = cancelled.cancelled() => return cancelled_response(), result = read_json(&mut response, 8 * 1024 * 1024) => result };
-                            match body {
-                                Ok(body) if body["choices"].is_array() && body.get("error").is_none() => Json(body).into_response(),
+                                tokio::select! {
+                                    _ = cancel.cancelled() => { let _ = sender.try_send(Err(std::io::Error::other("Routing configuration changed."))); return; },
+                                    result = sender.send(item) => if result.is_err() { return; },
+                                }
+                                if finished || failed {
+                                    return;
+                                }
+                            }
+                        });
+                        let chunks = futures_util::stream::unfold(receiver, |mut receiver| async {
+                            receiver.recv().await.map(|item| (item, receiver))
+                        });
+                        Response::builder()
+                            .status(200)
+                            .header("content-type", "text/event-stream")
+                            .body(Body::from_stream(chunks))
+                            .expect("Static response headers")
+                    } else {
+                        let body = tokio::select! { _ = cancelled.cancelled() => return cancelled_response(), result = read_json(&mut response, 8 * 1024 * 1024) => result };
+                        match body {
+                                Ok(mut body) if body["choices"].is_array() && body.get("error").is_none() => { body["model"] = json!(requested); Json(body).into_response() },
                                 _ => return error(StatusCode::BAD_GATEWAY, "invalid_upstream", "The selected server returned an invalid completion; request was not replayed."),
                             }
-                        };
-                        let headers = output.headers_mut();
-                        headers.insert("cache-control", HeaderValue::from_static("no-store"));
-                        for (name, value) in [
-                            ("x-ai-usage-account", &account.id),
-                            ("x-ai-usage-model", &model),
-                            ("x-ai-usage-upstream-model", &mapping.upstream),
-                            ("x-ai-usage-requested-model", &requested),
-                        ] {
-                            if let Ok(value) = HeaderValue::from_str(value) {
-                                headers.insert(name, value);
-                            }
+                    };
+                    let headers = output.headers_mut();
+                    headers.insert("cache-control", HeaderValue::from_static("no-store"));
+                    for (name, value) in [
+                        ("x-ai-usage-account", &account.id),
+                        ("x-ai-usage-model", &requested),
+                        ("x-ai-usage-upstream-model", &member.model),
+                        ("x-ai-usage-requested-model", &requested),
+                    ] {
+                        if let Ok(value) = HeaderValue::from_str(value) {
+                            headers.insert(name, value);
                         }
-                        return output;
                     }
-                    Err(RouteFailure::Unavailable {
-                        reason,
-                        retry_at,
-                        account_wide,
-                    }) => {
-                        let until = retry_at.max((self.clock)() + 1);
-                        let mut cooldowns = self.cooldowns.lock().await;
-                        // Configuration changes cancel first, then clear this same map.
-                        // Check under its lock so a late error cannot block a new account revision.
-                        if cancelled.is_cancelled() {
-                            return cancelled_response();
-                        }
-                        cooldowns.insert(
-                            (
-                                account.id.clone(),
-                                if account_wide {
-                                    String::new()
-                                } else {
-                                    mapping.upstream.clone()
-                                },
-                            ),
-                            until,
-                        );
-                        next_retry = Some(next_retry.map_or(until, |old: i64| old.min(until)));
-                        reasons.push(json!({"account":account.id,"model":model,"reason":reason}));
+                    return output;
+                }
+                Err(RouteFailure::Unavailable {
+                    reason,
+                    retry_at,
+                    account_wide,
+                }) => {
+                    let until = retry_at.max((self.clock)() + 1);
+                    let mut cooldowns = self.cooldowns.lock().await;
+                    // Configuration changes cancel first, then clear this same map.
+                    // Check under its lock so a late error cannot block a new account revision.
+                    if cancelled.is_cancelled() {
+                        return cancelled_response();
                     }
-                    Err(RouteFailure::Invalid(message)) => {
-                        return error(StatusCode::BAD_REQUEST, "unsupported_request", message)
-                    }
-                    Err(RouteFailure::Failed(message)) => {
-                        return error(StatusCode::BAD_GATEWAY, "upstream_failed", message)
-                    }
+                    cooldowns.insert(
+                        (
+                            account.id.clone(),
+                            if account_wide {
+                                String::new()
+                            } else {
+                                member.model.clone()
+                            },
+                        ),
+                        until,
+                    );
+                    next_retry = Some(next_retry.map_or(until, |old: i64| old.min(until)));
+                    reasons
+                        .push(json!({"account":account.id,"model":member.model,"reason":reason}));
+                }
+                Err(RouteFailure::Invalid(message)) => {
+                    return error(StatusCode::BAD_REQUEST, "unsupported_request", message)
+                }
+                Err(RouteFailure::Failed(message)) => {
+                    return error(StatusCode::BAD_GATEWAY, "upstream_failed", message)
                 }
             }
         }
-        let mut result = (StatusCode::TOO_MANY_REQUESTS, Json(json!({"error":{"type":"allowance_unavailable","message":"No eligible account can serve this model or its configured fallbacks. Paid fallback is disabled.","attempts":reasons,"retry_at":next_retry}}))).into_response();
+        let mut result = (StatusCode::TOO_MANY_REQUESTS, Json(json!({"error":{"type":"allowance_unavailable","message":"No entry in this model pool is currently eligible. Check the account reasons below. Plan-only routing is enabled.","attempts":reasons,"retry_at":next_retry}}))).into_response();
         if let Some(until) = next_retry {
             if let Ok(value) = HeaderValue::from_str(&(until - (self.clock)()).max(1).to_string()) {
                 result.headers_mut().insert("retry-after", value);

@@ -107,7 +107,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            version: 2,
+            version: 3,
             refresh_minutes: 5,
             providers: BTreeMap::new(),
             routing: Default::default(),

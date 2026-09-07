@@ -14,7 +14,7 @@ impl IUsageProvider for OpenCode {
         )))
     }
     fn definition(&self) -> ProviderDefinition {
-        ProviderDefinition { id: "opencode", name: "OpenCode", category: "llm", initials: "OC", color: "#e0dcd3", description: "OpenCode Go subscription allowances: five-hour, weekly and monthly usage. Zen pay-as-you-go credits are separate.", help_url: "https://opencode.ai/auth", fields: vec![SettingField::secret("api_key", "OpenCode API key", "Use a key from the workspace with your Go subscription. Saved in Windows Credential Manager; leave blank to keep the saved key."), crate::routing::subscriptions::SubscriptionKind::OpenCodeGo.billing_field()] }
+        ProviderDefinition { id: "opencode", name: "OpenCode", category: "llm", initials: "OC", color: "#e0dcd3", description: "OpenCode Go subscription allowances: five-hour, weekly and monthly usage. Zen pay-as-you-go credits are separate.", help_url: "https://opencode.ai/auth", fields: vec![SettingField::secret("api_key", "OpenCode API key", "Use a key from the workspace with your Go subscription. Saved in Windows Credential Manager; leave blank to keep the saved key.")] }
     }
     async fn connect(
         &self,

@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     credentials::ISecretStore,
     routing::{
-        config::{AccountRouting, ModelMapping, RouterSettings},
+        config::{AccountRouting, ModelPool, PoolMember, RouterSettings},
         engine::{RouteAccount, RouterEngine},
     },
 };
@@ -97,20 +97,11 @@ fn all_windows_gate_go_and_the_last_exhausted_window_controls_retry() {
 }
 
 #[test]
-fn subscription_modes_must_be_explicit_and_cannot_enable_credit_plan_routing() {
+fn subscription_routing_defaults_to_plan_only_without_extra_billing_options() {
     for kind in [SubscriptionKind::OpenCodeGo, SubscriptionKind::OllamaCloud] {
-        let adapter = SubscriptionProvider::new(kind);
-        let mut config = ProviderConfig::default();
-        assert!(adapter.validate(&config).is_ok()); // Existing monitoring settings migrate unchanged.
-        config.routing.enabled = true;
-        for mode in ["", "unconfirmed", "paid", "monthly_credits"] {
-            config.fields.insert("routing_billing".into(), mode.into());
-            assert!(adapter.validate(&config).is_err());
-        }
-        config
-            .fields
-            .insert("routing_billing".into(), kind.billing_mode().into());
-        assert!(adapter.validate(&config).is_ok());
+        let config = ProviderConfig::default();
+        assert!(config.routing.enabled);
+        assert!(SubscriptionProvider::new(kind).validate(&config).is_ok());
     }
 }
 
@@ -181,14 +172,7 @@ fn account(server: &Server, id: &str, kind: SubscriptionKind) -> RouteAccount {
         id: id.into(),
         config: ProviderConfig {
             enabled: true,
-            routing: AccountRouting {
-                enabled: true,
-                models: vec![ModelMapping {
-                    model: MODEL.into(),
-                    upstream: MODEL.into(),
-                }],
-            },
-            fields: [("routing_billing".into(), kind.billing_mode().into())].into(),
+            routing: AccountRouting { enabled: true },
             ..Default::default()
         },
         provider: Arc::new(SubscriptionProvider {
@@ -212,7 +196,16 @@ async fn engine(server: &Server, clock: Arc<AtomicI64>) -> Arc<RouterEngine> {
         .configure(
             RouterSettings {
                 enabled: true,
-                account_order: vec!["go".into(), "cloud".into()],
+                pools: vec![ModelPool {
+                    name: MODEL.into(),
+                    members: ["go", "cloud"]
+                        .into_iter()
+                        .map(|id| PoolMember {
+                            account_id: id.into(),
+                            model: MODEL.into(),
+                        })
+                        .collect(),
+                }],
                 ..Default::default()
             },
             vec![
@@ -306,7 +299,7 @@ async fn race_at_provider_limit_fails_over_and_both_exhausted_stop_without_paid_
 }
 
 #[tokio::test]
-async fn unknown_allowance_unknown_models_and_unconfirmed_billing_never_generate() {
+async fn unknown_allowance_unknown_models_and_disabled_accounts_never_generate() {
     let f = Fixture::default();
     let server = server(f.clone()).await;
     let engine = engine(&server, Arc::new(AtomicI64::new(NOW))).await;
@@ -315,6 +308,13 @@ async fn unknown_allowance_unknown_models_and_unconfirmed_billing_never_generate
         .configure(
             RouterSettings {
                 enabled: true,
+                pools: vec![ModelPool {
+                    name: MODEL.into(),
+                    members: vec![PoolMember {
+                        account_id: "go".into(),
+                        model: MODEL.into(),
+                    }],
+                }],
                 ..Default::default()
             },
             vec![config],
@@ -326,11 +326,18 @@ async fn unknown_allowance_unknown_models_and_unconfirmed_billing_never_generate
     );
     *f.usage.lock().unwrap() = usage();
     let mut config = account(&server, "go", SubscriptionKind::OpenCodeGo);
-    config.config.fields.clear();
+    config.config.routing.enabled = false;
     engine
         .configure(
             RouterSettings {
                 enabled: true,
+                pools: vec![ModelPool {
+                    name: MODEL.into(),
+                    members: vec![PoolMember {
+                        account_id: "go".into(),
+                        model: MODEL.into(),
+                    }],
+                }],
                 ..Default::default()
             },
             vec![config],
@@ -340,12 +347,18 @@ async fn unknown_allowance_unknown_models_and_unconfirmed_billing_never_generate
         engine.route(prompt()).await.status(),
         StatusCode::TOO_MANY_REQUESTS
     );
-    let mut config = account(&server, "go", SubscriptionKind::OpenCodeGo);
-    config.config.routing.models[0].upstream = "missing".into();
+    let config = account(&server, "go", SubscriptionKind::OpenCodeGo);
     engine
         .configure(
             RouterSettings {
                 enabled: true,
+                pools: vec![ModelPool {
+                    name: MODEL.into(),
+                    members: vec![PoolMember {
+                        account_id: "go".into(),
+                        model: "missing".into(),
+                    }],
+                }],
                 ..Default::default()
             },
             vec![config],

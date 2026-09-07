@@ -1,25 +1,33 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
-#[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AccountRouting {
+    #[serde(default = "enabled_by_default")]
     pub enabled: bool,
-    pub models: Vec<ModelMapping>,
+}
+fn enabled_by_default() -> bool {
+    true
+}
+impl Default for AccountRouting {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PoolMember {
+    pub account_id: String,
+    pub model: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ModelMapping {
-    pub model: String,
-    pub upstream: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct FallbackRule {
-    pub model: String,
-    pub alternatives: Vec<String>,
+pub struct ModelPool {
+    pub name: String,
+    pub members: Vec<PoolMember>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -27,17 +35,15 @@ pub struct FallbackRule {
 pub struct RouterSettings {
     pub enabled: bool,
     pub port: u16,
-    pub account_order: Vec<String>,
-    pub fallbacks: Vec<FallbackRule>,
+    #[serde(default)]
+    pub pools: Vec<ModelPool>,
 }
-
 impl Default for RouterSettings {
     fn default() -> Self {
         Self {
             enabled: false,
             port: 43129,
-            account_order: vec![],
-            fallbacks: vec![],
+            pools: vec![],
         }
     }
 }
@@ -49,7 +55,6 @@ pub fn valid_model(model: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"._:/-".contains(&b))
 }
-
 pub fn valid_account(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 80
@@ -58,128 +63,67 @@ pub fn valid_account(id: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_-".contains(&b))
 }
 
-pub fn validate_account(account: &AccountRouting) -> Result<(), String> {
-    if account.models.len() > 128 {
-        return Err("Use at most 128 model mappings per account.".into());
-    }
-    let mut seen = BTreeSet::new();
-    for mapping in &account.models {
-        if !valid_model(&mapping.model)
-            || !valid_model(&mapping.upstream)
-            || !seen.insert(&mapping.model)
-        {
-            return Err(
-                "Model mappings need valid, unique client model names and an upstream model ID."
-                    .into(),
-            );
-        }
-    }
-    if account.enabled && account.models.is_empty() {
-        return Err("Add at least one model before enabling account routing.".into());
-    }
-    Ok(())
-}
-
 pub fn validate(settings: &RouterSettings, accounts: &BTreeSet<String>) -> Result<(), String> {
     if settings.port < 1024 {
         return Err("Choose a router port between 1024 and 65535.".into());
     }
-    let mut seen = BTreeSet::new();
-    for id in &settings.account_order {
-        if !accounts.contains(id) || !seen.insert(id) {
-            return Err("Account order contains an unknown or duplicate account.".into());
-        }
+    validate_pools(&settings.pools, accounts)
+}
+pub fn validate_pools(pools: &[ModelPool], accounts: &BTreeSet<String>) -> Result<(), String> {
+    if pools.len() > 8192 {
+        return Err("Use at most 8192 custom model pools.".into());
     }
-    if settings.fallbacks.len() > 128 {
-        return Err("Use at most 128 fallback rules.".into());
-    }
-    let mut rules = BTreeMap::new();
-    for rule in &settings.fallbacks {
-        if !valid_model(&rule.model)
-            || rules.insert(&rule.model, &rule.alternatives).is_some()
-            || rule.alternatives.len() > 16
-        {
-            return Err(
-                "Fallback rules need unique model names and at most 16 alternatives.".into(),
-            );
+    let mut names = BTreeSet::new();
+    for pool in pools {
+        if !valid_model(&pool.name) || !names.insert(&pool.name) {
+            return Err("Pool names must be unique and use letters, numbers, dots, underscores, colons, slashes or hyphens, without spaces.".into());
         }
-        let mut names = BTreeSet::new();
-        for model in &rule.alternatives {
-            if !valid_model(model) || !names.insert(model) {
-                return Err("A fallback contains an invalid or duplicate model.".into());
+        if pool.members.len() > 8192 {
+            return Err("Use at most 8192 entries in a model pool.".into());
+        }
+        let mut members = BTreeSet::new();
+        for member in &pool.members {
+            if !accounts.contains(&member.account_id)
+                || !valid_model(&member.model)
+                || !members.insert(member)
+            {
+                return Err("Each pool entry needs a known account and model ID, without duplicate account/model pairs.".into());
             }
         }
-    }
-    fn visit<'a>(
-        node: &'a str,
-        rules: &BTreeMap<&'a String, &'a Vec<String>>,
-        stack: &mut BTreeSet<&'a str>,
-        done: &mut BTreeSet<&'a str>,
-    ) -> Result<(), String> {
-        if done.contains(node) {
-            return Ok(());
-        }
-        if !stack.insert(node) {
-            return Err("Model fallbacks contain a cycle. Remove the circular mapping.".into());
-        }
-        if let Some(next) = rules
-            .iter()
-            .find_map(|(key, value)| (key.as_str() == node).then_some(*value))
-        {
-            for child in next {
-                visit(child, rules, stack, done)?;
-            }
-        }
-        stack.remove(node);
-        done.insert(node);
-        Ok(())
-    }
-    let mut done = BTreeSet::new();
-    for node in rules.keys() {
-        visit(node, &rules, &mut BTreeSet::new(), &mut done)?;
     }
     Ok(())
-}
-
-// Breadth first: X, then X's explicit alternatives in order, then their alternatives.
-pub fn model_order(requested: &str, rules: &[FallbackRule]) -> Vec<String> {
-    let mut result = vec![requested.to_string()];
-    let mut seen = BTreeSet::from([requested.to_string()]);
-    let mut cursor = 0;
-    while cursor < result.len() {
-        if let Some(rule) = rules.iter().find(|r| r.model == result[cursor]) {
-            for name in &rule.alternatives {
-                if seen.insert(name.clone()) {
-                    result.push(name.clone());
-                }
-            }
-        }
-        cursor += 1;
-    }
-    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn mappings_are_ordered_deduplicated_and_cycles_are_rejected() {
-        let mut config = RouterSettings {
-            fallbacks: vec![
-                FallbackRule {
-                    model: "x".into(),
-                    alternatives: vec!["y".into(), "z".into()],
+    fn pools_use_ordered_account_model_pairs_and_unique_space_free_names() {
+        let accounts = BTreeSet::from(["first".into(), "second".into()]);
+        let mut pools = vec![ModelPool {
+            name: "flash-models".into(),
+            members: vec![
+                PoolMember {
+                    account_id: "first".into(),
+                    model: "glm-flash".into(),
                 },
-                FallbackRule {
-                    model: "y".into(),
-                    alternatives: vec!["z".into()],
+                PoolMember {
+                    account_id: "second".into(),
+                    model: "deepseek-flash".into(),
                 },
             ],
-            ..Default::default()
-        };
-        assert!(validate(&config, &BTreeSet::new()).is_ok());
-        assert_eq!(model_order("x", &config.fallbacks), vec!["x", "y", "z"]);
-        config.fallbacks[1].alternatives.push("x".into());
-        assert!(validate(&config, &BTreeSet::new()).is_err());
+        }];
+        assert!(validate_pools(&pools, &accounts).is_ok());
+        assert_eq!(pools[0].members[1].model, "deepseek-flash");
+        pools[0].name = "flash models".into();
+        assert!(validate_pools(&pools, &accounts).is_err());
+        pools[0].name = "flash-models".into();
+        let duplicate = pools[0].members[0].clone();
+        pools[0].members.push(duplicate);
+        assert!(validate_pools(&pools, &accounts).is_err());
+        pools[0].members.pop();
+        pools[0].members[1].account_id = "missing".into();
+        assert!(validate_pools(&pools, &accounts).is_err());
+        assert!(AccountRouting::default().enabled);
     }
 }

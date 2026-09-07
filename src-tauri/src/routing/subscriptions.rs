@@ -2,7 +2,7 @@ use super::engine::{
     read_json, retry_time, IInferenceProvider, InferenceContext, InferenceDefinition,
     PreparedRequest, RouteFailure,
 };
-use crate::model::{number, timestamp, FieldOption, ProviderConfig, SettingField};
+use crate::model::{number, timestamp, ProviderConfig};
 use async_trait::async_trait;
 use reqwest::{
     header::{HeaderMap, HeaderValue},
@@ -21,45 +21,6 @@ pub enum SubscriptionKind {
 pub struct SubscriptionProvider {
     kind: SubscriptionKind,
     base: Url,
-}
-
-impl SubscriptionKind {
-    fn billing_mode(self) -> &'static str {
-        match self {
-            Self::OpenCodeGo => "go_included_only",
-            Self::OllamaCloud => "ollama_legacy_limits",
-        }
-    }
-
-    pub fn billing_field(self) -> SettingField {
-        let (label, help) = match self {
-            Self::OpenCodeGo => (
-                "Go only: Use balance off, no BYOK",
-                "Before enabling routing, turn off Use balance in the Go workspace and remove any bring-your-own-provider keys there. The Go API does not expose these billing settings. Confirm below only after checking them; the router also checks all three Go quota windows before each request.",
-            ),
-            Self::OllamaCloud => (
-                "Legacy session/weekly plan, no extra credits",
-                "Included-only routing currently supports the legacy session/weekly plan that stops at its limits. Do not select this for a monthly-credit plan or an account with extra usage credits. Ollama can spend those automatically. Disable routing before changing your plan or adding extra credits.",
-            ),
-        };
-        SettingField {
-            key: "routing_billing",
-            label: "Subscription billing",
-            kind: "select",
-            help,
-            placeholder: "",
-            options: vec![
-                FieldOption {
-                    value: "unconfirmed",
-                    label: "Usage only until billing is checked",
-                },
-                FieldOption {
-                    value: self.billing_mode(),
-                    label,
-                },
-            ],
-        }
-    }
 }
 
 impl SubscriptionProvider {
@@ -156,22 +117,18 @@ fn unavailable(reason: &'static str, retry_at: i64, account_wide: bool) -> Route
     }
 }
 
-/// The provider-side billing settings are a prerequisite, not a quota estimate.
-/// Go's endpoint does not reveal Use balance or BYOK settings; the owner must
-/// confirm them. Ollama credit plans are deliberately not accepted yet.
+/// Plan-only is the default. Provider-side paid overages must remain disabled;
+/// these APIs do not expose a per-request switch that can enforce that setting.
 #[async_trait]
 impl IInferenceProvider for SubscriptionProvider {
     fn definition(&self) -> InferenceDefinition {
         InferenceDefinition { description: match self.kind {
-            SubscriptionKind::OpenCodeGo => "OpenCode Go chat models using included allowances. Confirm subscription billing first. Every request checks five-hour, weekly and monthly quotas; depleted accounts are skipped until their reset.",
-            SubscriptionKind::OllamaCloud => "Ollama Cloud chat models using a legacy session/weekly subscription. Requires its API key and confirmation that extra credits are unavailable. Provider limit responses move requests to the next eligible account.",
+            SubscriptionKind::OpenCodeGo => "OpenCode Go chat models using included allowances. Keep Use balance off and remove workspace BYOK. Every request checks five-hour, weekly and monthly quotas; depleted accounts are skipped until their reset.",
+            SubscriptionKind::OllamaCloud => "Ollama Cloud chat models using a legacy session/weekly subscription. Use a plan that stops at its limits, without extra credits or automatic top-ups. Provider limit responses move requests to the next eligible account.",
         } }
     }
 
-    fn validate(&self, config: &ProviderConfig) -> Result<(), String> {
-        if config.routing.enabled && config.field("routing_billing") != self.kind.billing_mode() {
-            return Err("Check the provider's billing settings and select the included-only subscription option before enabling routing.".into());
-        }
+    fn validate(&self, _config: &ProviderConfig) -> Result<(), String> {
         Ok(())
     }
 
@@ -191,13 +148,6 @@ impl IInferenceProvider for SubscriptionProvider {
         request: &Value,
         upstream: &str,
     ) -> Result<PreparedRequest, RouteFailure> {
-        if ctx.config.field("routing_billing") != self.kind.billing_mode() {
-            return Err(unavailable(
-                "Included-only billing has not been confirmed for this subscription.",
-                ctx.now + 60,
-                true,
-            ));
-        }
         let key = self.key(ctx).map_err(|_| {
             unavailable(
                 "Save the subscription API key before routing.",

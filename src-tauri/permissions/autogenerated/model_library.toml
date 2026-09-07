@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-model-library"
+description = "Enables the model_library command without any pre-configured scope."
+commands.allow = ["model_library"]
+
+[[permission]]
+identifier = "deny-model-library"
+description = "Denies the model_library command without any pre-configured scope."
+commands.deny = ["model_library"]

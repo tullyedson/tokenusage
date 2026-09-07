@@ -2,8 +2,10 @@ import { isTauri } from "@tauri-apps/api/core";
 import { NativeApi } from "./api";
 import { balance, escapeHtml as esc, meterTone, percent, resetLabel, updatedLabel } from "./format";
 import { clearSecretInputs, readFields, renderField } from "./settings-form";
-import { accountRouting, bindModelRows, bindRoutingRows, modelRow, readAccountRouting, readRouting, routingPage } from "./routing-form";
+import { accountRouting, readAccountRouting, readRouting, routingPage } from "./routing-form";
 import type { Bootstrap, Category, IUsageAppApi, Page, ProviderDefinition, ProviderReport, SettingField, Unsubscribe, UsageMeter } from "./types";
+import { ModelsPage } from "./models-page";
+import { version } from "../package.json";
 import "./style.css";
 import "./routing.css";
 
@@ -17,6 +19,7 @@ const categories: { id: Category; title: string; description: string; icon: stri
   { id: "media", title: "Media", description: "Images and video", icon: "▧" },
 ];
 let api: IUsageAppApi;
+let modelsPage: ModelsPage;
 let data: Bootstrap;
 let page: Page = "usage";
 let preview = false;
@@ -46,14 +49,14 @@ function errorMessage(error: unknown): string { return error instanceof Error ? 
 function renderShell(): void {
   appRoot.innerHTML = `${preview ? '<div class="preview-banner">Browser preview · Sample readings, no accounts connected</div>' : ""}
     <header class="app-header"><a class="brand" href="#usage">${logo()}<span>AI Usage</span></a>
-      <nav aria-label="Main"><button type="button" data-page="usage">Usage</button><button type="button" data-page="routing">Routing</button><button type="button" data-page="settings">Settings</button></nav>
+      <nav aria-label="Main"><button type="button" data-page="usage">Usage</button><button type="button" data-page="models">Models</button><button type="button" data-page="routing">Routing</button><button type="button" data-page="settings">Settings</button></nav>
       <span class="tray-note"><span class="live-dot"></span>In your tray</span>
     </header>
     <main id="content"></main>
-    <footer><span>Private to this Windows account</span><span>AI Usage <span class="version">0.3.1</span></span></footer>
+    <footer><span>Private to this Windows account</span><span>AI Usage <span class="version">${esc(version)}</span></span></footer>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <dialog id="forget-dialog"><form method="dialog"><span class="eyebrow">DISCONNECT PROVIDER</span><h2>Forget this connection?</h2><p>This clears this app’s saved key, website session and settings for the provider. Your subscription stays active.</p><div class="form-actions"><button value="cancel" class="secondary">Cancel</button><button value="forget" class="danger">Forget connection</button></div></form></dialog>`;
-  appRoot.querySelectorAll<HTMLButtonElement>("[data-page]").forEach(button => button.addEventListener("click", () => navigate(button.dataset.page === "settings" ? "settings" : button.dataset.page === "routing" ? "routing" : "usage")));
+  appRoot.querySelectorAll<HTMLButtonElement>("[data-page]").forEach(button => button.addEventListener("click", () => navigate(button.dataset.page === "models" ? "models" : button.dataset.page === "settings" ? "settings" : button.dataset.page === "routing" ? "routing" : "usage")));
   appRoot.querySelector(".brand")?.addEventListener("click", event => { event.preventDefault(); navigate("usage"); });
   renderPage();
 }
@@ -66,7 +69,9 @@ function renderPage(): void {
   });
   const content = appRoot.querySelector<HTMLElement>("#content");
   if (!content) return;
-  if (page === "settings") { content.innerHTML = settingsPage(); bindSettings(); }
+  modelsPage.unmount();
+  if (page === "models") { modelsPage.mount(content, data); }
+  else if (page === "settings") { content.innerHTML = settingsPage(); bindSettings(); }
   else if (page === "routing") { content.innerHTML = routingPage(data); bindRouting(); }
   else { content.innerHTML = usagePage(); bindUsage(); }
 }
@@ -179,23 +184,6 @@ function bindSettings(): void {
   });
   appRoot.querySelectorAll<HTMLFormElement>("[data-provider-form]").forEach(form => {
     const id = form.dataset.providerForm ?? "";
-    bindModelRows(form);
-    form.querySelector("[data-list-models]")?.addEventListener("click", () => {
-      if (!form.reportValidity()) return;
-      void withForm(form, async () => {
-        const models = await api.discoverModels(id);
-        const catalog = form.querySelector<HTMLElement>("[data-model-catalog]");
-        if (!catalog) return;
-        catalog.replaceChildren();
-        if (!models.length) { catalog.textContent = "No eligible models found. Check your server or provider model catalog."; return; }
-        const label = document.createElement("p"); label.textContent = "Choose a model to add its ID. You can then give it a shared client name."; catalog.append(label);
-        const select = document.createElement("select"); select.setAttribute("aria-label", "Available server models");
-        for (const model of models) { const option = document.createElement("option"); option.value = model; option.textContent = model; select.append(option); }
-        const add = document.createElement("button"); add.type = "button"; add.className = "secondary"; add.textContent = "Add selected model";
-        add.addEventListener("click", () => { form.querySelector("[data-model-rows]")?.insertAdjacentHTML("beforeend", modelRow({ model: select.value, upstream: select.value })); });
-        catalog.append(select, add);
-      });
-    });
     form.addEventListener("submit", event => {
       event.preventDefault();
       void withForm(form, async () => { await saveForm(form, id, form.querySelector<HTMLInputElement>('[name="enabled"]')?.checked ?? false); notify("Provider settings saved."); if (data.settings.providers[id]?.enabled) void refresh(id); });
@@ -235,7 +223,6 @@ function updateSetupStatus(): void {
 }
 function bindRouting(): void {
   const form = appRoot.querySelector<HTMLFormElement>("#routing-form"); if (!form) return;
-  bindRoutingRows(form);
   const key = form.querySelector<HTMLInputElement>("#client-token");
   form.querySelector("[data-generate-token]")?.addEventListener("click", () => {
     if (key) { const random = crypto.getRandomValues(new Uint8Array(32)); key.value = [...random].map(value => value.toString(16).padStart(2, "0")).join(""); notify("New key generated. Copy it to your calling app, then save routing settings."); }
@@ -264,6 +251,7 @@ async function start(): Promise<void> {
   if (isTauri()) api = new NativeApi();
   else if (import.meta.env.DEV) { const { PreviewApi } = await import("./preview"); api = new PreviewApi(); preview = true; }
   else throw new Error("Open the installed AI Usage desktop app to connect your accounts.");
+  modelsPage = new ModelsPage(api, notify);
   subscriptions.push(await api.onUsage(reports => { if (!data) return; data.reports = reports; if (page === "usage") renderPage(); else updateSetupStatus(); }));
   subscriptions.push(await api.onSettings(() => { void reloadData().then(() => { if (page === "usage") renderPage(); else updateSetupStatus(); }).catch(error => notify(errorMessage(error), true)); }));
   subscriptions.push(await api.onPage(next => { if (data) navigate(next); else page = next; }));

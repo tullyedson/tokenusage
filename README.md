@@ -2,15 +2,16 @@
 
 A Rust and Tauri 2 app for Windows that shows AI account usage in the system tray and provides an optional local model router.
 
-**Version 0.4.0** adds OpenCode Go and Ollama Cloud subscription routing, including GLM-5.3-Flash, account failover and OpenCode client setup. It retains multiple accounts, usage/reset bars, model aliases, explicit substitutions, streaming, the Ollama reset-time fix and the separate Codex-Spark meter removal.
+**Version 0.5.0** adds automatic model discovery and ordered model pools. Create a common name such as `flash-models`, drag in models from different providers or local servers, and order them. Calling apps use that one name while the router follows its fallback list. Plan-only routing is the default for supported accounts. Existing model mappings and fallback rules migrate into pools.
 
 | Page | What you can do |
 | --- | --- |
 | **Usage** | See every enabled account's reported allowances, balances, percentages remaining and reset times. |
-| **Settings** | Connect accounts, add more accounts at a provider, configure models, and choose refresh/startup behavior. |
-| **Routing** | Choose account priority, model substitutions, and the local API connection used by calling apps. |
+| **Settings** | Connect accounts, add more accounts at a provider, and choose refresh/startup behavior. |
+| **Models** | Browse every discovered model, create common names, and drag models into ordered pools. |
+| **Routing** | Enable the local API and manage its port and client key. |
 
-**Routing supports OpenCode Go, eligible Ollama Cloud subscriptions, Ollama (local), vLLM (local or LAN), and verified OpenRouter free models.** Go and Ollama Cloud require the provider billing setup below to stop at included allowances. OpenAI/Codex, Anthropic, Suno and Higgsfield remain usage-monitoring connections only. A subscription usage bar alone does not enable inference. The router never selects a paid fallback.
+**Routing supports OpenCode Go, eligible Ollama Cloud subscriptions, Ollama (local), vLLM (local or LAN), and verified OpenRouter free models.** Go and Ollama Cloud require the provider billing setup below to stop at included allowances. OpenAI/Codex, Anthropic, Suno and Higgsfield remain usage-monitoring connections only. A subscription usage bar alone does not enable inference. There is no paid fallback option in the app. Provider-side overages must also be disabled as described below.
 
 [Install](#install-and-open) · [Connect accounts](#connect-accounts-and-see-usage) · [Set up routing](#set-up-routing) · [Calling-app example](#connect-a-calling-app) · [Troubleshooting](#troubleshooting) · [Build from source](#build-from-source)
 
@@ -20,10 +21,10 @@ This README describes the checked-out source version. `main` changes only after 
 
 Use Windows x64 and Microsoft Edge WebView2. You do not need Rust or Node.js to run an installer supplied by the maintainer; those are only needed to build the app.
 
-1. Run the **AI Usage 0.4.0 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
+1. Run the **AI Usage 0.5.0 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
 2. Launch **AI Usage** from the Start menu. If you cannot see its tray icon, open Windows' hidden-icons area.
 3. Click or double-click the tray icon to open **Usage**. Right-click it for **Show usage**, **Settings**, or **Exit**.
-4. Use the **Usage**, **Settings** and **Routing** tabs in the app window. Closing this window hides it; **Exit** stops the app and its router.
+4. Use the **Usage**, **Models**, **Routing** and **Settings** tabs in the app window. Closing this window hides it; **Exit** stops the app and its router.
 
 To upgrade, finish active routed requests, choose **Exit**, run the newer installer, then reopen AI Usage. Existing settings and account connections are preserved. In **Settings**, enable **Start with Windows** if you want the app to start with its window hidden. The router also starts when the app starts if you have enabled and saved it.
 
@@ -35,7 +36,7 @@ To upgrade, finish active routed requests, choose **Exit**, run the newer instal
 4. Open **Usage** and choose **Refresh all**, or **Refresh** on one account. A successful read adds a connection checkmark in Settings and shows that account's meters. Usage monitoring sends no generation requests.
 5. To change saved options later, select **Enable this account** as needed and choose **Save settings**. Automatic refresh defaults to five minutes; change **Refresh every** in Settings to any value from 1 to 60 minutes and choose **Save**.
 
-Use **Add another account** inside a provider for another connection. Each account has its own label, saved keys, website session, usage readings and model mappings. Existing connections migrate without changing their credential targets or browser profiles. Multiple **Use signed-in Codex** connections follow the same installed Codex login; use independent website connections to monitor separate OpenAI accounts.
+Use **Add another account** inside a provider for another connection. Each account has its own label, saved keys, website session, usage readings and pool membership. Existing connections migrate without changing their credential targets or browser profiles. Multiple **Use signed-in Codex** connections follow the same installed Codex login; use independent website connections to monitor separate OpenAI accounts.
 
 ## Included providers
 
@@ -43,7 +44,7 @@ Use **Add another account** inside a provider for another connection. Each accou
 | --- | --- | --- | --- |
 | OpenAI | LLM | **Sign in to ChatGPT**, or **Use signed-in Codex** if the installed Codex app/CLI is already signed in. Leave **Codex executable** blank for automatic discovery. **ChatGPT account ID** is optional for a specific website workspace. | Codex subscription windows and any additional credit balance. Other ChatGPT chat-model caps are not exposed by this source. |
 | Anthropic | LLM | Sign in to Claude. Leave **Organization ID** blank for automatic selection; specify the subscribed organization if the reader reports several choices. | Five-hour and weekly usage, available model-specific windows and enabled extra-usage spending allowance. |
-| Ollama Cloud | LLM | Sign in for usage. Routing additionally needs an **Ollama API key** for that account and eligible **Subscription billing** settings. | Monthly included-credit spending and any session, hourly or weekly percentages shown in settings, with each window's reported reset date and local time. |
+| Ollama Cloud | LLM | Sign in for usage. Routing additionally needs an **Ollama API key** for that account and a plan that stops at its limits without extra credits. | Monthly included-credit spending and any session, hourly or weekly percentages shown in settings, with each window's reported reset date and local time. |
 | OpenRouter | LLM | Choose **Account credits (management key)** or **This key's allowance (standard key)**, then enter the matching **OpenRouter key**. | Account USD balance, or the selected key's remaining spending allowance. |
 | OpenCode | LLM | Enter an **OpenCode API key** from the workspace/member with an active Go subscription. | Go five-hour, weekly and monthly percentages and reset times. |
 | Suno | Music | Sign in to Suno. **Total-credit reference allowance** is optional. | Monthly subscription credits and total credits, including top-ups. |
@@ -65,7 +66,7 @@ Failed refreshes retain the last successful reading for the current app session 
 
 ## Set up routing
 
-You need a supported account or local server, at least one saved model mapping, and a calling app on the same Windows PC that supports an **OpenAI-compatible Chat Completions** connection. AI Usage must stay running in the tray. Routing starts disabled.
+You need a supported account or local server, a discovered chat model or a saved pool, and a calling app on the same Windows PC that supports an **OpenAI-compatible Chat Completions** connection. AI Usage must stay running in the tray. Routing starts disabled.
 
 ### 1. Prepare a supported connection
 
@@ -73,16 +74,15 @@ You need a supported account or local server, at least one saved model mapping, 
 
 These are upstream providers. The **OpenCode application** is a separate client that connects to the AI Usage router.
 
-1. In your Go workspace, turn **Use balance off** and remove any bring-your-own-provider keys. Go can otherwise charge Zen balance or use those keys. In **AI Usage > Settings > LLM > OpenCode**, save that workspace's API key. Under **Subscription billing**, select **Go only: Use balance off, no BYOK** after checking both settings.
-2. For the backup, **Ollama Cloud** currently supports its legacy session/weekly subscription with no extra usage credits. Sign in for usage, save an **Ollama API key (routing)** for the same account, and confirm **Legacy session/weekly plan, no extra credits** under **Subscription billing**. The newer monthly-credit plans are not eligible for included-only routing in this version. They can automatically spend extra credits after included credits.
-3. On both accounts, choose **List server models** and add `glm-5.3-flash`. Use `glm-5.3-flash` as both **Client model** and **Server model ID**. The direct Ollama Cloud API uses this ID without `:cloud`.
-4. Enable each account and its routing toggle, save, then put **OpenCode above Ollama Cloud** on the Routing page. No model-substitution rule is needed because both mappings use the same model name.
+1. In your Go workspace, turn **Use balance off** and remove bring-your-own-provider keys. Go can otherwise charge Zen balance or use those keys. In **Settings > LLM > OpenCode**, save that workspace's API key and enable the account. **Include this account in model pools** is on by default.
+2. For **Ollama Cloud**, use its legacy session/weekly subscription that stops at its limits, without extra usage credits or automatic top-ups. Save the same account's **Ollama API key (routing)** and enable the account. Monthly-credit accounts that can automatically spend extra credits are not supported for plan-only routing. Website usage sign-in is separate from the routing key.
+3. Open **Models** and choose **Refresh models**. Every eligible model name from both catalogs appears automatically. For a preferred order, create or select `glm-5.3-flash` and put the Go entry first, then the Ollama Cloud entry. Choose **Save pools**. The direct Ollama Cloud API uses the model ID without `:cloud`.
 
-Go's API checks all three allowance windows before every request. A depleted window skips Go until the last applicable reset. A provider rejection at submission, including a concurrent quota exhaustion, can hand the request to Ollama Cloud. On subsequent requests Go regains priority once a fresh check confirms allowance. Ollama determines its availability at submission; its 429/402 responses skip the account. The router honors `Retry-After`, or rechecks after 60 seconds when the provider supplies no retry time. If both providers are exhausted it returns an error.
+Go checks all three allowance windows before every request. An exhausted window skips that account until its applicable reset, followed by a fresh quota check. Ollama determines availability at submission; 429/402 responses move to the next pool entry. The router honors `Retry-After`, or rechecks after 60 seconds when no retry time is provided. It stops when all pool entries are unavailable.
 
-**Provider billing settings are required.** These APIs have no verified per-request switch that prohibits paid balance. The saved billing selection records your confirmation; it does not read or change provider billing settings. Leave subscription routing disabled until the conditions above are true, and disable it before changing those conditions. Usage monitoring works without confirming billing. Credentials stay in Windows Credential Manager. Model listing and Go quota checks do not generate text.
+**Plan only is the app's default policy, with no paid fallback switch.** These provider APIs do not expose a verified per-request no-overage switch or a way to inspect their external billing settings. Keep paid overages, extra credits and automatic top-ups disabled at the provider. Disable an account's pool toggle before changing those conditions. The app does not change your provider billing settings. Credentials remain in Windows Credential Manager, and model discovery/quota reads do not generate text.
 
-Model catalogs are discovered through each adapter. You can map other catalog models using the same controls; the selected model must support Chat Completions and the request's tools/options. GLM-5.3-Flash is the initial integration target. A Responses-only or Messages-only model requires a separate protocol adapter.
+Catalog names are discovered through each provider adapter. A selected model must support Chat Completions and the requested tools/options. A Responses-only or Messages-only model requires a separate protocol adapter. OpenAI/Codex, Anthropic, Suno and Higgsfield still support usage monitoring only.
 
 **Ollama on this PC**
 
@@ -113,32 +113,41 @@ Local server URLs accept a root URL or `/v1`. They accept `localhost`, loopback 
 
 Choose **Settings > LLM > OpenRouter**, set **Usage source** to **This key's allowance (standard key)**, enter a standard OpenRouter API key, and choose **Connect account**. A management key is for account-balance monitoring and cannot be used for routing. You can add a second OpenRouter connection if you want management-key balance monitoring as well.
 
-**List server models** returns only explicit `:free` IDs whose catalog prices are zero. Choose from that list; paid models and automatic selectors are excluded. The router enforces zero-price limits and disables provider-side fallback. The USD usage bar does not report how many free requests remain: OpenRouter determines availability on each request, and a rate-limit response can move the request to your next configured route.
+**Models > Refresh models** discovers only explicit `:free` IDs whose catalog prices are zero. Choose from that list; paid models and automatic selectors are excluded. The router enforces zero-price limits and disables provider-side fallback. The USD usage bar does not report how many free requests remain: OpenRouter determines availability on each request, and a rate-limit response can move the request to your next configured route.
 
-### 2. Save model names for each account
+### 2. Browse models and create a pool
 
-1. Save or connect the account before listing models. **List server models** uses the saved URL and key.
-2. In that account's **Model routing** section, choose **List server models**, select a model, then choose **Add selected model**. You can also choose **Add model** and enter an exact server ID yourself.
-3. Set **Client model** to the name the calling app will request, for example `writer`. Leave **Server model ID** as the exact ID returned by the server, including any tag or `:free` suffix. For the Ollama example above, map `writer` to `llama3.2:1b`.
-4. Turn on both **Enable this account** and **Use this account for routing**, then choose **Save settings**.
-5. Repeat for each account or server you want to use. Give equivalent models the same **Client model** name on several accounts to make them backups for that name. Different model names require a fallback rule if you want automatic substitution.
+Open **Models**. The left side shows models grouped by account, with search and an account filter. All eligible names are discovered automatically when you open this page or a client requests `/v1/models`. Catalogs are cached for five minutes; **Refresh models** reads them again. Failed reads retain the previous catalog with an error until the account settings change. The router checks actual availability again before generation.
 
-Providers without a routing adapter show **Usage monitoring only** instead of model controls. Connecting them for usage does not enable subscription routing in this version.
+1. Under **Common model name**, enter `flash-models` and choose **Create**. Spaces are converted to hyphens so `flash models` becomes `flash-models`. Names are case-sensitive.
+2. Drag a model from the left into the pool. You can also select the pool in **Add to** and use a model's **Add** button.
+3. Add more models from any supported account. Different model families can share a pool; they do not need the same provider name or model ID.
+4. Drag entries to reorder them, or use the up/down arrows. Remove an entry with its × button.
+5. Choose **Save pools**. The saved pool name is the model name other apps request. Empty pools can be saved but are not advertised to clients.
 
-### 3. Choose account priority and model substitutions
+For example, a pool named `flash-models` could contain:
 
-Open the **Routing** tab. Under **Account priority**, use the up/down arrows to put your preferred account first. Accounts marked **Routing off** are skipped. The order applies to every requested model.
+| Order | Account | Upstream model |
+| --- | --- | --- |
+| 1 | OpenCode Go | `glm-5.3-flash` |
+| 2 | Ollama Cloud | Your chosen DeepSeek Flash model from its catalog |
+| 3 | Ollama (local) | Your installed Qwen model from its catalog |
 
-For a different model as backup, first save a mapping for that model on an eligible account, such as client name `small`. Under **Model substitutions**, choose **Add fallback rule**, enter `writer` as **Requested model**, and `small` as **Alternatives, in order**. Multiple alternatives are comma-separated, for example `small, offline`. These are client model names from your mappings. Choose **Save routing settings** to apply the order and rules.
+Use the exact IDs shown in your own catalog. The examples do not install models or assume that those models exist on every account.
 
-For a `writer` request, the router:
+**Automatic names:** Models with the same exact ID are grouped automatically across eligible accounts, in stable account-ID order. Expand **Show automatic model names** to inspect or customize those groups. Editing an automatic group saves a custom pool with that name. **Reset to automatic** discards that override. A custom pool name takes precedence over automatic discovery; there are no separate account-priority or fallback-rule controls.
 
-1. Tries accounts mapping `writer` in priority order.
-2. If none can serve it, tries accounts mapping `small`, then any later configured alternatives. An exact requested-model match takes precedence over every substitution.
-3. Skips accounts or models with an active quota/retry cooldown. Once the provider's reset or retry time passes, the preferred account is checked again on the next request. It regains priority if available.
-4. Returns an error when no eligible route remains. It never chooses an unconfigured alternative or switches to a paid request.
+Draft changes survive page navigation and catalog refresh. They take effect only after **Save pools**. A failed save leaves the draft intact.
 
-Fallback rules can point to other rules; traversal is breadth first and cycles are rejected. Failover occurs only when it is safe to try another route. An ambiguous submission failure or an interrupted response stream is not replayed on another account. Saving account or routing settings cancels active routed requests, so finish important requests before changing configuration.
+### 3. How fallback works
+
+For a `flash-models` request, the router tries that pool's entries from top to bottom. Each entry identifies one account and one upstream model. Disabled accounts, depleted allowances, unavailable models, and active cooldowns are skipped. A later exact-name match does not jump ahead of an earlier different model. Two models from the same account may appear in the same pool; duplicate account/model pairs are rejected.
+
+Every new request starts at the beginning of the pool. After a quota reset or retry time, the preferred entry is checked again and regains its position when available. If all entries are unavailable, the router returns an error with account/model reasons and a retry time when known. It never chooses a model outside the requested pool.
+
+JSON responses and streaming chunks expose the pool name in their `model` field. The actual selected model remains available in the `x-ai-usage-upstream-model` response header. Interrupted streams and ambiguous submission failures are not replayed on another account. Saving account, pool or routing settings cancels active requests, so finish important requests first.
+
+Upgrading converts old aliases, account priority and model-substitution rules into explicit pools in the same effective order. Existing enabled/excluded accounts, keys and browser profiles are preserved. New supported accounts have **Include this account in model pools** enabled by default; the global router still starts disabled on a new installation.
 
 ### 4. Enable the local API
 
@@ -153,12 +162,14 @@ The saved client key cannot be shown again. Leave its field blank when changing 
 
 ### OpenCode
 
-1. Merge the provider from [examples/opencode/opencode.json](examples/opencode/opencode.json) into your project's `opencode.json`, preserving existing providers. The example starts with `glm-5.3-flash` and conservative client limits of 128K context and 16K output; these are client limits, not a claim about the model's maximum capacity.
-2. In OpenCode, use `/connect`, choose **Other**, enter provider ID **ai-usage**, and save the **AI Usage client key**. Provider IDs must match exactly. OpenCode stores this key in its own native auth file; keep keys out of project JSON and Git.
-3. Copy [ai-usage-session.js](examples/opencode/ai-usage-session.js) into your project's `.opencode/plugins/` directory. It forwards only an opaque conversation ID to the router so Go receives its session header. It does not read credentials, prompts or project files.
-4. Start a new OpenCode session in the project and use `/models` to select **AI Usage local router > GLM-5.3-Flash**, or `opencode --model ai-usage/glm-5.3-flash`. Your conversation continues through the same local provider while AI Usage selects Go or Ollama Cloud underneath.
+1. Merge [examples/opencode/opencode.json](examples/opencode/opencode.json) into your project's `opencode.json`, preserving existing providers. Its optional explicit GLM limits are client settings, not a claim about upstream capacity.
+2. In OpenCode, use `/connect`, choose **Other**, enter provider ID **ai-usage**, and save the **AI Usage client key**. Keep provider keys and the router client key out of project JSON and Git.
+3. Copy [ai-usage-session.js](examples/opencode/ai-usage-session.js) into the project's `.opencode/plugins/` directory. It imports all model and pool names from the local router when OpenCode starts. It reads the `ai-usage` key from OpenCode's auth store (or an already configured API key), sends it only to the IPv4 loopback router, and forwards an opaque conversation ID. It never reads project source or prompts, and does not log keys.
+4. Restart OpenCode in that project after saving or renaming pools. Use `/models` to select **AI Usage local router**, then the desired model or `flash-models`. You can also use `opencode --model ai-usage/flash-models` after creating that pool.
 
-To make another router model selectable, save its mappings in AI Usage and add its **Client model** name under `provider.ai-usage.models` in OpenCode's config. Choose client context/output limits supported by every intended upstream. `opencode models ai-usage` lists configured OpenCode choices; authenticated `GET /v1/models` lists the router's active mappings. Neither list proves a live inference request succeeded.
+No individual JSON entry is needed for newly discovered model names. Imported models use conservative **client defaults** of 16,384 context and 4,096 output tokens. Override a name under `provider.ai-usage.models` when needed, using limits and capabilities supported by **every** entry in its pool. Tool support is assumed for the OpenCode integration; use chat/tool-capable models. Existing explicit model settings are preserved. If the router is offline, the plugin preserves manually configured models. Tested with OpenCode 1.18.29.
+
+`opencode models ai-usage` lists imported OpenCode choices. Authenticated `GET /v1/models` lists router model and pool names. Neither list proves an inference request succeeded or that a model supports every request option.
 
 ### Other clients
 
@@ -167,7 +178,7 @@ To make another router model selectable, save its mappings in AI Usage and add i
 | Connection/API type | OpenAI-compatible **Chat Completions** |
 | Base URL | `http://127.0.0.1:43129/v1`, or the URL displayed on Routing |
 | API key | The **client key** generated and saved in AI Usage |
-| Model | A saved **Client model** name, such as `writer` |
+| Model | A discovered model ID or saved pool name, such as `flash-models` |
 | Streaming | Supported through server-sent events when the selected upstream supports it |
 
 If a client asks for the complete chat endpoint instead of a base URL, use `http://127.0.0.1:43129/v1/chat/completions`. Do not append `/v1` twice. A Responses-only or Anthropic Messages-only client cannot use this API directly. Embeddings, image/music/audio generation and native agent execution are outside this API.
@@ -176,7 +187,7 @@ The listener is restricted to this PC's IPv4 loopback. Both endpoints require `A
 
 ### Try it from PowerShell
 
-Configure the `writer` mapping and enable the router first. This example prompts for the client key without putting it in command history, lists configured model names, then sends one short chat request. The list describes configuration, not guaranteed current model availability.
+Create the `flash-models` pool and enable the router first. This example prompts for the client key without putting it in command history, lists configured model names, then sends one short chat request. The list describes configuration, not guaranteed current model availability.
 
 ```powershell
 $usageBaseUrl = 'http://127.0.0.1:43129/v1'
@@ -189,7 +200,7 @@ try {
     $usageModels.data | Select-Object id
 
     $usageBody = @{
-        model = 'writer'
+        model = 'flash-models'
         messages = @(@{ role = 'user'; content = 'Reply with one short greeting.' })
         stream = $false
         max_tokens = 64
@@ -205,7 +216,7 @@ finally {
 }
 ```
 
-For a streaming client, use the same endpoint with `"stream": true` and consume the SSE stream. Send an optional `x-ai-usage-session` header containing a stable opaque conversation ID (1-200 letters, numbers, underscores or hyphens). `x-opencode-session` is also accepted. Without one, the router creates an ID for that request. Only Go receives this session metadata; arbitrary caller headers are not forwarded. Successful responses include `x-ai-usage-account`, `x-ai-usage-requested-model`, `x-ai-usage-model` and `x-ai-usage-upstream-model` headers so a client can identify the selected account and model. The response body's model remains the upstream ID.
+For a streaming client, use the same endpoint with `"stream": true` and consume the SSE stream. Send an optional `x-ai-usage-session` header containing a stable opaque conversation ID (1-200 letters, numbers, underscores or hyphens). `x-opencode-session` is also accepted. Without one, the router creates an ID for that request. Only Go receives this session metadata; arbitrary caller headers are not forwarded. Successful responses include `x-ai-usage-account`, `x-ai-usage-requested-model`, `x-ai-usage-model` and `x-ai-usage-upstream-model` headers so a client can identify the selected account and model. The response body's model is the requested pool name, including in streaming chunks.
 
 The [HTML routing guide](docs/ROUTING.html) has the complete supported request fields, error contract, limits, selection rules and provider extension interface. GitHub displays HTML as source; download or clone it and open `docs/ROUTING.html` in a browser for the formatted guide.
 
@@ -215,7 +226,7 @@ Configuration is stored at `%LOCALAPPDATA%\com.aiusagetray.desktop\settings.json
 
 Provider/server keys and the router client key are stored as generic credentials in **Windows Credential Manager**, private to the current Windows account, with target names starting `com.aiusagetray.desktop/`. Keys are sent from the local password field to native code for storage, never saved in settings JSON or returned to the frontend. A blank password field preserves the saved key; entering a replacement updates it. Native cloud usage reads use HTTPS. Local model connections may use HTTP on loopback or a private LAN. Requests reject redirects, honor cancellation, and have time and size limits.
 
-The router forwards your prompt to the selected provider or local server. AI Usage does not log or persist prompts or responses; the selected server or provider has its own data handling. Ordinary settings contain account labels, nonsecret connection options, model mappings and routing order.
+The router forwards your prompt to the selected provider or local server. AI Usage does not log or persist prompts or responses; the selected server or provider has its own data handling. Ordinary settings contain account labels, nonsecret connection options, model pools and their ordered account/model entries.
 
 Source and installer builds do not include those local profiles or existing Codex credentials. Each recipient connects their own accounts. Distribute the source or generated installer, never a copy of the app's runtime data directory.
 
@@ -230,12 +241,13 @@ Native app commands are restricted to the local main window. Remote sign-in page
 | No accounts on Usage | Connect an account or turn on **Enable this account** and choose **Save settings**. Then use **Refresh all**. |
 | Sign-in required or **Needs attention** | Open that account's **Connect account** window, finish sign-in or the provider's challenge, close it, and refresh. Old readings may remain visible with the error. |
 | No reset time or **Percent unavailable** | The source did not provide a usable timestamp or denominator. Local servers have no subscription percentage. For Ollama's split reset layout, use 0.3.1 or later. |
-| **Usage monitoring only** / **Routing off** | Check the supported-provider list above. A supported account needs both enable toggles, saved model mappings and **Save settings**. |
+| **Usage monitoring only** / **Routing off** | Check the supported-provider list above. A supported account needs both enable toggles, **Include this account in model pools** and **Save settings**. |
 | **No eligible models found** | Save the URL/key before listing, check that the server is running and has a chat model installed, and use its exact model ID. Ollama cloud aliases and non-free OpenRouter models are excluded. |
 | Router **Stopped** or connection refused | Start AI Usage, save a client key, enable the router and save. If the port is busy, choose another port and update the calling app's base URL. |
 | HTTP 401 | Use the AI Usage client key, not a provider key. Check that a new key was saved. Use the displayed loopback URL and a native/backend client without a browser Origin header. |
 | HTTP 400 | Check the model name, JSON body and supported fields. Use Chat Completions rather than Responses/Messages. Provider routing overrides and unsupported paid extensions are rejected. |
-| HTTP 429 | Read the error's `attempts` and `retry_at` fields when present. No configured route may be eligible, an upstream may be rate-limited, or all eight request slots may be busy. Check both account toggles and mappings, then wait for retry/reset or configure an eligible alternative. |
+| HTTP 404 / model not found | Refresh models in AI Usage, check the exact case-sensitive name, and restart OpenCode to import new names. |
+| HTTP 429 | Read the error's `attempts` and `retry_at` fields when present. No configured route may be eligible, an upstream may be rate-limited, or all eight request slots may be busy. Check both account toggles and pool entries, then wait for retry/reset or add an eligible model to the pool. |
 | HTTP 502 / 504 | Check the selected server's availability and supported chat parameters. A request that may already have been submitted is not automatically replayed. |
 | HTTP 503 or a stream stops during configuration | Saving settings cancels active routing work. Finish saving, confirm **Listening**, and submit a new request if appropriate. |
 | Need to remove one connection | Use **Forget** on that account. Other accounts are preserved. Turning an account off preserves its saved connection for later use. |
@@ -255,7 +267,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 
 The build script prepares a local test-temp directory, runs frontend tests, Rust tests and Clippy, then builds the production frontend and NSIS installer. The default outputs for this version are:
 
-- `src-tauri/target/release/bundle/nsis/AI Usage_0.4.0_x64-setup.exe`, the installer to distribute.
+- `src-tauri/target/release/bundle/nsis/AI Usage_0.5.0_x64-setup.exe`, the installer to distribute.
 - `src-tauri/target/release/ai-usage-tray.exe`, the app executable you can run directly.
 
 If `CARGO_TARGET_DIR` is set, the native outputs are under that directory instead. Build outputs, dependencies and account data are ignored by Git. Building the installer does not run it.
@@ -278,11 +290,11 @@ An optional integration test reads the existing Codex account's usage. It is ign
 cargo test --manifest-path src-tauri/Cargo.toml signed_in_codex_returns_usage -- --ignored
 ```
 
-Subscription fixture tests exercise the concrete Go and Ollama Cloud adapters with real local HTTP transport, quota exhaustion, reset recovery, session headers, streaming tool calls, separate keys and rejection of unconfirmed billing. See [Verification](docs/VERIFICATION.md) for completed checks and the exact scope of live account verification.
+Subscription fixture tests exercise the concrete Go and Ollama Cloud adapters with real local HTTP transport, quota exhaustion, reset recovery, session headers, streaming tool calls, separate keys and plan-only defaults and unknown allowance rejection. See [Verification](docs/VERIFICATION.md) for completed checks and the exact scope of live account verification.
 
 ## Add providers and contribute
 
-Provider metadata drives both Settings and Usage. A new provider implements `IUsageProvider` and registers once. Optional inference support goes through `IInferenceProvider`, which supplies model discovery and eligibility checks. See [Adding providers](docs/ADDING_PROVIDERS.md) and the [routing contract](docs/ROUTING.html). Core account ordering and the HTML pages do not need provider-specific branches.
+Provider metadata drives both Settings and Usage. A new provider implements `IUsageProvider` and registers once. Optional inference support goes through `IInferenceProvider`, which supplies model discovery and eligibility checks. See [Adding providers](docs/ADDING_PROVIDERS.md) and the [routing contract](docs/ROUTING.html). Core pool ordering and the HTML pages do not need provider-specific branches.
 
 Follow [Contributing](CONTRIBUTING.md): submit changes through a pull request. Contributions remain outside `main` until the repository owner explicitly chooses to merge them. Automatic merging is disabled. Never commit provider keys, browser profiles, runtime settings or personal account data.
 

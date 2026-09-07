@@ -3,7 +3,7 @@ use crate::{
     credentials::ISecretStore,
     model::ProviderConfig,
     routing::{
-        config::{AccountRouting, FallbackRule, ModelMapping},
+        config::{AccountRouting, ModelPool, PoolMember},
         engine::*,
         providers::HttpProvider,
     },
@@ -152,22 +152,28 @@ impl IInferenceProvider for Adapter {
         })
     }
 }
-fn account(id: &str, model: &str, provider: Arc<dyn IInferenceProvider>) -> RouteAccount {
+fn account(id: &str, _model: &str, provider: Arc<dyn IInferenceProvider>) -> RouteAccount {
     RouteAccount {
         id: id.into(),
         config: ProviderConfig {
             enabled: true,
-            routing: AccountRouting {
-                enabled: true,
-                models: vec![ModelMapping {
-                    model: model.into(),
-                    upstream: format!("server-{model}"),
-                }],
-            },
+            routing: AccountRouting { enabled: true },
             ..Default::default()
         },
         provider,
         serial: Arc::new(Mutex::new(())),
+    }
+}
+fn pool(name: &str, entries: &[(&str, &str)]) -> ModelPool {
+    ModelPool {
+        name: name.into(),
+        members: entries
+            .iter()
+            .map(|(account, model)| PoolMember {
+                account_id: (*account).into(),
+                model: (*model).into(),
+            })
+            .collect(),
     }
 }
 fn request(model: &str) -> Value {
@@ -208,7 +214,10 @@ async fn ordered_accounts_fail_over_on_429_and_return_to_preferred_after_reset()
         .configure(
             RouterSettings {
                 enabled: true,
-                account_order: vec!["first".into(), "second".into()],
+                pools: vec![pool(
+                    "server-x",
+                    &[("first", "server-x"), ("second", "server-x")],
+                )],
                 ..Default::default()
             },
             vec![
@@ -217,14 +226,14 @@ async fn ordered_accounts_fail_over_on_429_and_return_to_preferred_after_reset()
             ],
         )
         .await;
-    let response = engine.route(request("x")).await;
+    let response = engine.route(request("server-x")).await;
     assert_eq!(response.headers()["x-ai-usage-account"], "second");
     assert_eq!(body(response).await["model"], "server-x");
-    let response = engine.route(request("x")).await;
+    let response = engine.route(request("server-x")).await;
     assert_eq!(response.headers()["x-ai-usage-account"], "second");
     drop(response);
     clock.store(1061, Ordering::SeqCst);
-    let response = engine.route(request("x")).await;
+    let response = engine.route(request("server-x")).await;
     assert_eq!(response.headers()["x-ai-usage-account"], "first");
     drop(response);
     let calls = upstream.calls.lock().unwrap();
@@ -241,7 +250,7 @@ async fn ordered_accounts_fail_over_on_429_and_return_to_preferred_after_reset()
 }
 
 #[tokio::test]
-async fn model_substitution_waits_for_exact_model_accounts_and_unknown_models_stop() {
+async fn pool_order_can_choose_a_different_model_before_an_exact_model_and_reset_to_first() {
     let upstream = Upstream::default();
     let server = serve(
         Router::new()
@@ -263,11 +272,14 @@ async fn model_substitution_waits_for_exact_model_accounts_and_unknown_models_st
     });
     let settings = RouterSettings {
         enabled: true,
-        account_order: vec!["first".into(), "backup".into(), "exact".into()],
-        fallbacks: vec![FallbackRule {
-            model: "x".into(),
-            alternatives: vec!["y".into()],
-        }],
+        pools: vec![pool(
+            "server-x",
+            &[
+                ("first", "server-x"),
+                ("backup", "server-y"),
+                ("exact", "server-x"),
+            ],
+        )],
         ..Default::default()
     };
     engine
@@ -280,8 +292,9 @@ async fn model_substitution_waits_for_exact_model_accounts_and_unknown_models_st
             ],
         )
         .await;
-    let response = engine.route(request("x")).await;
-    assert_eq!(response.headers()["x-ai-usage-account"], "exact");
+    let response = engine.route(request("server-x")).await;
+    assert_eq!(response.headers()["x-ai-usage-account"], "backup");
+    assert_eq!(response.headers()["x-ai-usage-upstream-model"], "server-y");
     drop(response);
     engine
         .configure(
@@ -292,17 +305,14 @@ async fn model_substitution_waits_for_exact_model_accounts_and_unknown_models_st
             ],
         )
         .await;
-    let response = engine.route(request("x")).await;
-    assert_eq!(response.headers()["x-ai-usage-model"], "y");
-    drop(response);
+    let response = engine.route(request("server-x")).await;
+    assert_eq!(response.headers()["x-ai-usage-model"], "server-x");
+    assert_eq!(body(response).await["model"], "server-x");
     let response = engine.route(request("unmapped")).await;
-    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
-    assert_eq!(
-        body(response).await["error"]["type"],
-        "allowance_unavailable"
-    );
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(body(response).await["error"]["type"], "model_not_found");
     clock.store(1101, Ordering::SeqCst);
-    let response = engine.route(request("x")).await;
+    let response = engine.route(request("server-x")).await;
     assert_eq!(response.headers()["x-ai-usage-account"], "first");
     assert_eq!(upstream.calls.lock().unwrap().len(), 3);
 }
@@ -334,7 +344,7 @@ async fn streaming_preserves_events_and_terminal_errors_are_never_replayed() {
             ],
         )
         .await;
-    let mut req = request("x");
+    let mut req = request("server-x");
     req["stream"] = json!(true);
     let response = engine.route(req).await;
     let bytes = to_bytes(response.into_body(), 10000).await.unwrap();
@@ -342,7 +352,7 @@ async fn streaming_preserves_events_and_terminal_errors_are_never_replayed() {
         .unwrap()
         .ends_with("data: [DONE]\n\n"));
     upstream.server_error.store(true, Ordering::SeqCst);
-    let response = engine.route(request("x")).await;
+    let response = engine.route(request("server-x")).await;
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     assert_eq!(upstream.calls.lock().unwrap().len(), 2);
     assert!(!body(response)
@@ -408,7 +418,7 @@ async fn local_api_requires_key_and_loopback_host_rejects_browser_origins_and_pa
             .status(),
         StatusCode::OK
     );
-    let mut req = request("x");
+    let mut req = request("server-x");
     req["plugins"] = json!([{"id":"web"}]);
     let response = client
         .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
@@ -489,7 +499,7 @@ async fn real_local_vllm_adapter_discovers_and_sends_mapped_model() {
             vec![local],
         )
         .await;
-    let response = engine.route(request("x")).await;
+    let response = engine.route(request("server-x")).await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(body(response).await["model"], "server-x");
     assert_eq!(upstream.calls.lock().unwrap().len(), 1);
@@ -516,7 +526,7 @@ async fn changing_settings_cancels_a_waiting_request() {
         )
         .await;
     let cloned = engine.clone();
-    let pending = tokio::spawn(async move { cloned.route(request("x")).await });
+    let pending = tokio::spawn(async move { cloned.route(request("server-x")).await });
     tokio::task::yield_now().await;
     engine.configure(RouterSettings::default(), vec![]).await;
     let result = tokio::time::timeout(std::time::Duration::from_secs(2), pending)
@@ -561,7 +571,7 @@ async fn paused_stream_is_cancelled_without_waiting_for_the_client_to_read() {
             vec![first],
         )
         .await;
-    let mut req = request("x");
+    let mut req = request("server-x");
     req["stream"] = json!(true);
     let response = engine.route(req).await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -602,11 +612,11 @@ async fn local_ollama_metadata_blocks_cloud_aliases_before_generation() {
             vec![local],
         )
         .await;
-    let response = engine.route(request("x")).await;
+    let response = engine.route(request("server-x")).await;
     assert_eq!(response.status(), StatusCode::OK);
     drop(response);
     remote.store(true, Ordering::SeqCst);
-    let response = engine.route(request("x")).await;
+    let response = engine.route(request("server-x")).await;
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(upstream.calls.lock().unwrap().len(), 1);
 }

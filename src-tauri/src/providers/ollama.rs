@@ -10,7 +10,7 @@ impl IUsageProvider for Ollama {
         )))
     }
     fn definition(&self) -> ProviderDefinition {
-        ProviderDefinition { id: "ollama", name: "Ollama Cloud", category: "llm", initials: "Ol", color: "#d2d8e0", description: "Read included monthly credits and any hourly, session or weekly allowances shown in Ollama settings.", help_url: "https://ollama.com/settings", fields: vec![SettingField::secret("api_key", "Ollama API key (routing)", "For model routing only. The website usage reader still uses your sign-in. Save a key for the same account; leave blank to preserve it."), crate::routing::subscriptions::SubscriptionKind::OllamaCloud.billing_field()] }
+        ProviderDefinition { id: "ollama", name: "Ollama Cloud", category: "llm", initials: "Ol", color: "#d2d8e0", description: "Read included monthly credits and any hourly, session or weekly allowances shown in Ollama settings.", help_url: "https://ollama.com/settings", fields: vec![SettingField::secret("api_key", "Ollama API key (routing)", "For model routing only. The website usage reader still uses your sign-in. Save a key for the same account; leave blank to preserve it.")] }
     }
     fn browser_spec(&self) -> Option<BrowserSpec> {
         Some(BrowserSpec {

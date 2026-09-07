@@ -1,12 +1,18 @@
 # Verification record
 
-## Version 0.5.0 model pools
+## Version 0.5.1 model pools
 
 On September 6, 2026, 46 Rust tests and 25 frontend tests passed, with strict Clippy, production TypeScript/Vite compilation and NSIS packaging. Pool tests cover exact order across different models/providers, return after reset, automatic catalogs, cache expiry and stale/error handling, disabled accounts, custom overrides, version 1/2 migration, UTF-8 SSE chunk boundaries, tool-call preservation and stable response model names. Existing no-paid-request, local-model verification, credential isolation, cancellation and no-replay regressions pass.
 
 DOM integration tests exercise creation with spaces converted to hyphens, drag-and-drop and arrow ordering, mixed providers, duplicate prevention, draft preservation across navigation/refresh, failed saves, resetting to automatic groups, and connection saves preserving pools. OpenCode plugin tests cover automatic name import, explicit limit preservation, offline behavior, loopback-only authentication and stable session headers. The Models page was rendered in an isolated headless browser at 980 pixels wide, including a populated three-entry pool; its controls and layout were inspected without controlling the user's desktop.
 
 The account owner completed the provider billing setup and enabled Go and Ollama Cloud before this update. Version 0.5.0 defaults to plan-only routing without a confirmation dropdown. The app cannot inspect or change the provider-side overage switches, and supported Ollama billing remains the legacy capped plan without extra credits. Live quota exhaustion/reset recovery is simulated in fixtures, not by consuming real allowances.
+
+Version 0.5.1 explicitly disables Tauri's native file-drop interception on the main window, which is required for HTML5 drag-and-drop on Windows. The pool integration test guards this host setting as well as the DOM behavior. All checks and NSIS packaging above were rerun for 0.5.1. Native pointer interactions were not exercised while the owner used the desktop.
+
+After the owner's restart approval, the 0.5.0 and final 0.5.1 installers were applied silently and the app restarted hidden. Both upgrades preserved settings byte-for-byte and the Windows startup preference. The running 0.5.1 executable matches the extracted installer payload exactly, with one tray process. Its authenticated router catalog and Harborlight's OpenCode 1.18.29 each expose 46 models, including GLM and the existing local Qwen route. The OpenCode plugin matches the distributed example, and its project configuration and authentication file remain unchanged.
+
+Neutral live requests through the same routing engine in 0.5.0 succeeded for Go GLM and Ollama Cloud DeepSeek. A local Qwen streaming request returned a valid tool call across 27 events and a terminal marker, without executing a tool. These requests preserved the requested model name. Real account depletion and reset were not induced; those transitions remain fixture-tested. The final Windows-only patch was followed by fresh catalog/client checks without repeating cloud generation. Existing settings version 2 is migrated in memory; the next successful settings save persists version 3.
 
 ## Automated checks
 
@@ -48,6 +54,8 @@ The native app opened successfully, and the dashboard layout was inspected. Desk
 
 ## Packaged release
 
+The version 0.5.1 Windows x64 NSIS installer passed archive integrity and product-version checks. Full executable comparison found only Tauri's three-byte UNK-to-NSS bundle marker; the installed executable matches the extracted payload exactly. The package contains the application and standard NSIS helper assets. Account data remains outside the source and release archives. The installer is unsigned.
+
 The version 0.4.0 Windows x64 NSIS installer passed archive integrity and product-version checks on 2026-09-06. The seven-file payload contains the application and standard installer helpers. A complete byte comparison matched the optimized executable apart from Tauri's three-byte UNK-to-NSS bundle marker. The installed executable exactly matches that payload.
 
 The version 0.3.2 Windows x64 NSIS installer passed archive integrity and product-version checks on 2026-09-06. The packaged executable differs from the optimized build only in Tauri's three-byte UNK-to-NSS bundle marker; a complete byte comparison verified no other differences. The silent installed executable exactly matches that packaged payload.
@@ -69,8 +77,8 @@ These require the user's account sign-ins or an uninterrupted desktop session:
 - Claude, Higgsfield, Suno and Ollama sign-in, live balances, session persistence and expired-session recovery.
 - OpenAI website sign-in, if that connection is used instead of installed Codex.
 - OpenRouter management-key account credits and standard-key allowances against a real account, including key replacement and Forget in the installed app.
-- OpenCode Go key authentication and live allowance values for a subscribed workspace. Zen wallet balances are outside the current OpenCode connection.
+- OpenCode Go website session persistence and expired-session recovery. Native key authentication, all three allowance windows and included-plan generation were exercised as recorded above. Zen wallet balances are outside the current OpenCode connection.
 - Installer UI, uninstall UI and optional Windows startup after an actual install.
-- Version 0.3 routing UI in the native window, live local model generation, OpenRouter free-model generation, caller streaming/disconnect behavior, and installed router startup/shutdown. All current routing verification uses fictional local HTTP fixtures and the headless HTML test.
+- Pool drag/drop in the native window, OpenRouter free-model generation, local Ollama generation and real caller disconnect behavior. Local vLLM generation, streaming tool calls, silent installation, router restart and OpenCode model import passed as recorded above. Quota exhaustion/reset and disconnect/cancellation paths use local HTTP fixtures.
 
-Creating an installer does not install it or change Windows startup settings. The separate 0.3.2 silent upgrade and its verified scope are recorded above; interactive installation and uninstall UI remain user-controlled checks.
+Building an installer alone does not install it or change Windows startup settings. The separate silent upgrades and their verified scope are recorded above; interactive installation and uninstall UI remain user-controlled checks.

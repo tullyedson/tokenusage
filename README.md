@@ -2,7 +2,7 @@
 
 A Rust and Tauri 2 app for Windows that shows AI account usage in the system tray and provides an optional local model router.
 
-**Version 0.5.0** adds automatic model discovery and ordered model pools. Create a common name such as `flash-models`, drag in models from different providers or local servers, and order them. Calling apps use that one name while the router follows its fallback list. Plan-only routing is the default for supported accounts. Existing model mappings and fallback rules migrate into pools.
+**Version 0.5.1** adds automatic model discovery and ordered model pools. Create a common name such as `flash-models`, drag in models from different providers or local servers, and order them. Calling apps use that one name while the router follows its fallback list. Plan-only routing is the default for supported accounts. Existing model mappings and fallback rules migrate into pools.
 
 | Page | What you can do |
 | --- | --- |
@@ -21,7 +21,7 @@ This README describes the checked-out source version. `main` changes only after 
 
 Use Windows x64 and Microsoft Edge WebView2. You do not need Rust or Node.js to run an installer supplied by the maintainer; those are only needed to build the app.
 
-1. Run the **AI Usage 0.5.0 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
+1. Run the **AI Usage 0.5.1 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
 2. Launch **AI Usage** from the Start menu. If you cannot see its tray icon, open Windows' hidden-icons area.
 3. Click or double-click the tray icon to open **Usage**. Right-click it for **Show usage**, **Settings**, or **Exit**.
 4. Use the **Usage**, **Models**, **Routing** and **Settings** tabs in the app window. Closing this window hides it; **Exit** stops the app and its router.
@@ -267,7 +267,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 
 The build script prepares a local test-temp directory, runs frontend tests, Rust tests and Clippy, then builds the production frontend and NSIS installer. The default outputs for this version are:
 
-- `src-tauri/target/release/bundle/nsis/AI Usage_0.5.0_x64-setup.exe`, the installer to distribute.
+- `src-tauri/target/release/bundle/nsis/AI Usage_0.5.1_x64-setup.exe`, the installer to distribute.
 - `src-tauri/target/release/ai-usage-tray.exe`, the app executable you can run directly.
 
 If `CARGO_TARGET_DIR` is set, the native outputs are under that directory instead. Build outputs, dependencies and account data are ignored by Git. Building the installer does not run it.

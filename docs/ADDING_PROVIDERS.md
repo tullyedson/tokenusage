@@ -82,3 +82,5 @@ The service serializes refreshes per provider, retains a failed refresh's last s
 Use fictional payload fixtures for consumption-to-remaining conversion, multiple windows, missing limits, exhausted quotas, unexpected login pages and changed response shapes. Test the actual JavaScript reader with mocked fetch. Keep pure parser tests on the concrete provider type: constructing the whole dynamic registry drags Windows UI imports into a Rust test executable that lacks the application's UI manifest.
 
 Run the commands in the README. Then verify sign-in, refresh, session persistence and Forget with an authorized real test account. Public-site contract research and fixtures alone do not prove that a site's sign-in flow accepts WebView2. Record that limitation until a real session has been exercised.
+
+The main Tauri window must keep `dragDropEnabled: false`: Tauri native file-drop interception otherwise suppresses HTML5 pool drag/drop on Windows. See [Tauri configuration](https://v2.tauri.app/reference/config/#windowconfig). Provider sign-in windows retain their independent security configuration.

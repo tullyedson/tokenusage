@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { NativeApi } from "../src/api";
 import { ModelsPage } from "../src/models-page";
 import type { Bootstrap, ModelLibrary } from "../src/types";
+import desktop from "../src-tauri/tauri.conf.json";
 
 const library: ModelLibrary = { catalogs: [
   { accountId: "go", models: ["glm-flash", "second-model"], checkedAt: 1000, error: null },
@@ -37,6 +38,8 @@ function drag(source: Element, target: Element) {
   target.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
 }
 it("creates a mixed pool, supports drag and keyboard ordering, and saves the exact fallback sequence", async () => {
+  // Tauri's native file-drop interception suppresses HTML5 drop events on Windows.
+  expect(desktop.app.windows.find(window => window.label === "main")?.dragDropEnabled).toBe(false);
   const { save } = await setup(); create(" flash models ");
   const target = () => document.querySelector('[data-pool="flash-models"]')!;
   for (const model of ["glm-flash", "deepseek-flash", "Qwen"]) {

@@ -79,7 +79,11 @@ pub fn from_value(mut value: Value) -> Result<Settings, String> {
                     }
                 }
             }
-            ModelPool { name, members }
+            ModelPool {
+                name,
+                mode: Default::default(),
+                members,
+            }
         })
         .collect();
     value["routing"] = serde_json::to_value(RouterSettings {

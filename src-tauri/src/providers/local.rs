@@ -30,10 +30,10 @@ impl IUsageProvider for LocalModels {
         let mut base = SettingField::text(
             "base_url",
             "Server URL",
-            "Use localhost or a private LAN IP. The server must already be running.",
+            "Use localhost, a private LAN IP or a .local hostname. The server must already be running.",
         );
         base.placeholder = url;
-        ProviderDefinition { id, name, category: "llm", initials, color: "#82bbec", description: "Models running on your own hardware. There is no subscription quota. Configure model names under Routing after connecting.", help_url: help, fields: vec![base, SettingField::secret("api_key", "Server API key", "Optional for local Ollama. Use your vLLM server key if authentication is enabled.")] }
+        ProviderDefinition { id, name, category: "llm", initials, color: "#82bbec", description: "Models running on your own hardware. There is no subscription quota. Create model pools on Models after connecting.", help_url: help, fields: vec![base, SettingField::secret("api_key", "Server API key", "Optional for local Ollama. Use your vLLM server key if authentication is enabled.")] }
     }
     fn inference(&self) -> Option<Arc<dyn IInferenceProvider>> {
         Some(Arc::new(self.0))
@@ -50,9 +50,7 @@ impl IUsageProvider for LocalModels {
         context: &FetchContext,
         config: &ProviderConfig,
     ) -> Result<UsageSnapshot, String> {
-        let client = reqwest::Client::builder()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
+        let client = crate::routing::network::client_builder()
             .build()
             .map_err(|_| "Could not initialize local server connection.")?;
         let inference_context = InferenceContext {

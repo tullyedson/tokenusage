@@ -125,6 +125,10 @@ async fn reports_distinguish_complete_error_and_truncated_streams_without_changi
         let report = engine.routing_report();
         assert_eq!(report.recent[0].status, status);
         assert_eq!(report.recent[0].http_status, Some(200));
+        assert_eq!(
+            report.recent[0].metrics.response_bytes,
+            Some(source.len() as u64)
+        );
         assert!(!serde_json::to_string(&report).unwrap().contains("private"));
     }
 }

@@ -1,6 +1,7 @@
 //! Native inference adapters. No provider credentials or prompts are logged.
 use super::engine::*;
 use super::metadata::{enrich_ollama, InferenceModel, ModelLimits};
+use super::network::{local_hostname, private_ip};
 use crate::model::ProviderConfig;
 use async_trait::async_trait;
 use reqwest::Url;
@@ -40,13 +41,12 @@ pub fn local_base(config: &ProviderConfig, default: &str) -> Result<Url, String>
         .trim_start_matches('[')
         .trim_end_matches(']');
     let allowed = match host.parse::<IpAddr>() {
-        Ok(IpAddr::V4(ip)) => ip.is_loopback() || ip.is_private(),
-        Ok(IpAddr::V6(ip)) => ip.is_loopback() || ip.is_unique_local(),
-        Err(_) => false,
+        Ok(ip) => private_ip(ip),
+        Err(_) => local_hostname(host),
     };
     if !allowed {
         return Err(
-            "Local models require localhost, a loopback IP, or a private LAN IP address.".into(),
+            "Local models require localhost, a private LAN IP, or a .local hostname resolving only to private LAN addresses.".into(),
         );
     }
     url.set_path("/");
@@ -208,19 +208,26 @@ impl IInferenceProvider for HttpProvider {
             .await
             .map_err(|_| RouteFailure::Unavailable {
                 reason: "Model availability could not be verified.",
-                retry_at: chrono::Utc::now().timestamp() + 15,
+                retry_at: ctx.now + 15,
                 account_wide: true,
             })?;
         if !models.iter().any(|model| model.id == upstream) {
             return Err(RouteFailure::Unavailable {
                 reason: "Model is unavailable or does not meet the local/free-only policy.",
-                retry_at: chrono::Utc::now().timestamp() + 30,
+                retry_at: ctx.now + 30,
                 account_wide: false,
             });
         }
         // A local alias can point at a remote model. Verify metadata immediately before
         // generation, instead of relying solely on its user-chosen name or cached tags.
         if matches!(self, Self::OllamaLocal) {
+            // These are read-only preflight failures. No inference has been sent,
+            // so another verified local entry can safely serve the request.
+            let unavailable = || RouteFailure::Unavailable {
+                reason: "Could not verify local model metadata.",
+                retry_at: ctx.now + 15,
+                account_wide: true,
+            };
             let url = self
                 .base(ctx.config)
                 .map_err(|_| RouteFailure::Invalid("Invalid Ollama URL."))?
@@ -237,32 +244,29 @@ impl IInferenceProvider for HttpProvider {
             {
                 call = call.bearer_auth(key.as_str());
             }
-            let mut response = call
-                .send()
-                .await
-                .map_err(|_| RouteFailure::Failed("Could not verify local model metadata."))?;
+            let mut response = call.send().await.map_err(|_| unavailable())?;
             if !response.status().is_success() {
-                return Err(RouteFailure::Failed(
-                    "Could not verify local model metadata.",
-                ));
+                return Err(unavailable());
             }
             let metadata = read_json(&mut response, 4 * 1024 * 1024)
                 .await
-                .map_err(|_| RouteFailure::Failed("Could not verify local model metadata."))?;
+                .map_err(|_| unavailable())?;
             if !is_local_ollama(&metadata) {
                 return Err(RouteFailure::Unavailable {
                     reason: "This Ollama model is not confirmed local.",
-                    retry_at: chrono::Utc::now().timestamp() + 30,
+                    retry_at: ctx.now + 30,
                     account_wide: false,
                 });
             }
         }
         let mut body = request.clone();
         body["model"] = json!(upstream);
+        super::metrics::request_stream_usage(&mut body);
         if matches!(self, Self::OpenRouterFree) {
             body["provider"] = json!({"max_price":{"prompt":0,"completion":0,"request":0,"image":0},"allow_fallbacks":false});
         }
         Ok(PreparedRequest {
+            allowance_before: None,
             headers: Default::default(),
             url: self
                 .base(ctx.config)
@@ -299,6 +303,7 @@ mod tests {
             "http://localhost:11434/v1",
             "http://192.168.1.20:8000",
             "http://[::1]:8000",
+            "http://fixture.local:11434/v1",
         ] {
             let config = ProviderConfig {
                 fields: [("base_url".into(), url.into())].into(),

@@ -1,5 +1,5 @@
 // Development-only fixture adapter. Vite removes this module from release builds.
-import type { AccountRouting, ModelPool, ModelLibrary, Bootstrap, IUsageAppApi, Page, ProviderDefinition, ProviderReport, RouterSettings, RoutingReport, Unsubscribe, UsageMeter } from "./types";
+import type { CallMetrics, AccountRouting, ModelPool, ModelLibrary, Bootstrap, IUsageAppApi, Page, ProviderDefinition, ProviderReport, RouterSettings, RoutingReport, Unsubscribe, UsageMeter } from "./types";
 
 const providers: ProviderDefinition[] = [
   { id: "openai", name: "OpenAI", category: "llm", initials: "OA", color: "#87e4b0", description: "Codex allowances included with your ChatGPT subscription.", helpUrl: "https://chatgpt.com/codex/settings/usage", fields: [{ key: "connection", label: "Connection", kind: "select", help: "Use a separate website session or the existing Codex sign-in.", placeholder: "", options: [{ value: "browser", label: "Sign in to ChatGPT" }, { value: "codex", label: "Use signed-in Codex" }] }] },
@@ -17,7 +17,7 @@ function sample(label: string, percentLeft: number, hours: number, remaining: nu
 }
 function fixture(): Bootstrap {
   const empty = new URLSearchParams(location.search).has("empty");
-  const pools: ModelPool[] = new URLSearchParams(location.search).has("pool") ? [{ name: "flash-models", members: [{ accountId: "opencode", model: "glm-5.3-flash" }, { accountId: "ollama", model: "deepseek-flash" }, { accountId: "ollama", model: "qwen3-coder" }] }] : [];
+  const pools: ModelPool[] = new URLSearchParams(location.search).has("pool") ? [{ name: "flash-models", mode: new URLSearchParams(location.search).has("distribution") ? "loadDistribution" : "failover", members: [{ accountId: "opencode", model: "glm-5.3-flash" }, { accountId: "ollama", model: "deepseek-flash" }, { accountId: "ollama", model: "qwen3-coder" }] }] : [];
   const reports: ProviderReport[] = providers.map((provider, index) => ({
     providerId: provider.id, updatedAt: Math.floor(Date.now() / 1000) - 30, attemptedAt: Math.floor(Date.now() / 1000) - 30, refreshing: false, error: null,
     snapshot: { plan: ["Pro", "Max", "Pro", "Pro", "Ultimate", "Account credits", "Go subscription"][index] ?? null, note: null, meters: [
@@ -32,6 +32,9 @@ function fixture(): Bootstrap {
   }));
   return { providers, settings: { version: 3, refreshMinutes: 5, routing: { enabled: false, port: 43129, pools }, providers: empty ? {} : Object.fromEntries(providers.map(provider => [provider.id, { providerType: "", label: "", routing: { enabled: true }, enabled: true, fields: {}, sessionGeneration: 0, revision: 0 }])) }, reports: empty ? [] : reports, startupError: null, configuredSecrets: {}, inference: { opencode: { description: "OpenCode Go plan allowances." }, ollama: { description: "Ollama Cloud plan allowances." }, openrouter: { description: "Free models only." } }, router: { running: false, baseUrl: "http://127.0.0.1:43129/v1", tokenConfigured: false, error: null } };
 }
+function sampleMetrics(overrides: Partial<CallMetrics> = {}): CallMetrics {
+  return { requestBytes: 183420, responseBytes: 14280, tokens: { input: 42000, output: 720, total: 42720, cachedInput: 32000, reasoning: null }, contextLimit: 1000000, contextUsedPercent: 4.272, allowance: null, ...overrides };
+}
 function reportFixture(): RoutingReport {
   if (new URLSearchParams(location.search).has("empty")) return { active: [], recent: [], historyLimit: 100, attemptLimit: 64 };
   const now = Math.floor(Date.now() / 1000);
@@ -39,12 +42,12 @@ function reportFixture(): RoutingReport {
   const cloud = { accountId: "ollama", accountLabel: "Cloud plan", providerId: "ollama", model: "deepseek-flash", position: 2 };
   const local = { accountId: "local-server", accountLabel: "Desk server", providerId: "vllm-local", model: "qwen-coder", position: 1 };
   return { historyLimit: 100, attemptLimit: 64, active: [
-    { id: "15", pool: "flash-models", startedAt: now - 7, finishedAt: null, durationMs: 7400, streaming: true, status: "streaming", target: cloud, attempts: [{ target: go, outcome: "skipped", reason: "Included allowance exhausted.", retryAt: now + 3600 }, { target: cloud, outcome: "selected", reason: "Provider accepted the request.", retryAt: null }], omittedAttempts: 0, fallbackCount: 1, httpStatus: null, message: "Receiving the provider's response stream." },
-    { id: "14", pool: "local-coding", startedAt: now - 11, finishedAt: null, durationMs: 11800, streaming: true, status: "streaming", target: local, attempts: [{ target: local, outcome: "selected", reason: "Provider accepted the request.", retryAt: null }], omittedAttempts: 0, fallbackCount: 0, httpStatus: null, message: "Receiving the provider's response stream." },
+    { metrics: sampleMetrics({ responseBytes: 6280, tokens: null, contextUsedPercent: null }), id: "15", pool: "flash-models", mode: "failover", startedAt: now - 7, finishedAt: null, durationMs: 7400, streaming: true, status: "streaming", target: cloud, attempts: [{ target: go, outcome: "skipped", reason: "Included allowance exhausted.", retryAt: now + 3600 }, { target: cloud, outcome: "selected", reason: "Provider accepted the request.", retryAt: null }], omittedAttempts: 0, fallbackCount: 1, httpStatus: null, message: "Receiving the provider's response stream." },
+    { metrics: sampleMetrics({ contextLimit: 65536, contextUsedPercent: 65.185546875 }), id: "14", pool: "local-coding", mode: "failover", startedAt: now - 11, finishedAt: null, durationMs: 11800, streaming: true, status: "streaming", target: local, attempts: [{ target: local, outcome: "selected", reason: "Provider accepted the request.", retryAt: null }], omittedAttempts: 0, fallbackCount: 0, httpStatus: null, message: "Receiving the provider's response stream." },
   ], recent: [
-    { id: "13", pool: "flash-models", startedAt: now - 30, finishedAt: now - 22, durationMs: 8210, streaming: true, status: "completed", target: cloud, attempts: [{ target: go, outcome: "skipped", reason: "Included allowance exhausted.", retryAt: now + 3600 }, { target: cloud, outcome: "selected", reason: "Provider accepted the request.", retryAt: null }], omittedAttempts: 0, fallbackCount: 1, httpStatus: 200, message: "Provider stream completed." },
-    { id: "12", pool: "local-coding", startedAt: now - 65, finishedAt: now - 60, durationMs: 5090, streaming: false, status: "completed", target: local, attempts: [{ target: local, outcome: "selected", reason: "Provider accepted the request.", retryAt: null }], omittedAttempts: 0, fallbackCount: 0, httpStatus: 200, message: "Completion received." },
-    { id: "11", pool: "plan-only-chat", startedAt: now - 93, finishedAt: now - 92, durationMs: 900, streaming: true, status: "failed", target: null, attempts: [{ target: go, outcome: "skipped", reason: "Included allowance exhausted.", retryAt: now + 3600 }], omittedAttempts: 0, fallbackCount: 0, httpStatus: 429, message: "Every pool entry is unavailable." },
+    { metrics: sampleMetrics(), id: "13", pool: "flash-models", mode: "failover", startedAt: now - 30, finishedAt: now - 22, durationMs: 8210, streaming: true, status: "completed", target: cloud, attempts: [{ target: go, outcome: "skipped", reason: "Included allowance exhausted.", retryAt: now + 3600 }, { target: cloud, outcome: "selected", reason: "Provider accepted the request.", retryAt: null }], omittedAttempts: 0, fallbackCount: 1, httpStatus: 200, message: "Provider stream completed." },
+    { metrics: sampleMetrics({ contextLimit: 65536, contextUsedPercent: 65.185546875 }), id: "12", pool: "local-coding", mode: "failover", startedAt: now - 65, finishedAt: now - 60, durationMs: 5090, streaming: false, status: "completed", target: local, attempts: [{ target: local, outcome: "selected", reason: "Provider accepted the request.", retryAt: null }], omittedAttempts: 0, fallbackCount: 0, httpStatus: 200, message: "Completion received." },
+    { metrics: sampleMetrics({ responseBytes: null, tokens: null, contextUsedPercent: null }), id: "11", pool: "plan-only-chat", mode: "failover", startedAt: now - 93, finishedAt: now - 92, durationMs: 900, streaming: true, status: "failed", target: null, attempts: [{ target: go, outcome: "skipped", reason: "Included allowance exhausted.", retryAt: now + 3600 }], omittedAttempts: 0, fallbackCount: 0, httpStatus: 429, message: "Every pool entry is unavailable." },
   ] };
 }
 export class PreviewApi implements IUsageAppApi {

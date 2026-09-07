@@ -3,7 +3,8 @@ use super::{
     engine::{error, RouteAccount, RouterEngine},
 };
 use axum::{
-    extract::{DefaultBodyLimit, State},
+    body::{Body, Bytes},
+    extract::{DefaultBodyLimit, FromRequest, Request, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -174,7 +175,7 @@ async fn models(State(state): State<HttpState>, headers: HeaderMap) -> Response 
 async fn chat(
     State(state): State<HttpState>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    MeasuredJson { body, bytes }: MeasuredJson,
 ) -> Response {
     if !authorized(&state, &headers) {
         return error(StatusCode::UNAUTHORIZED, "unauthorized", "A valid local client key and loopback Host are required. Browser origins are not accepted.");
@@ -182,16 +183,52 @@ async fn chat(
     let session = headers
         .get("x-ai-usage-session")
         .or_else(|| headers.get("x-opencode-session"));
-    match session {
-        None => state.engine.route(body).await,
-        Some(value) => match value.to_str() {
-            Ok(value) => state.engine.route_with_session(body, Some(value)).await,
-            Err(_) => error(
+    let instance = headers.get("x-ai-usage-instance");
+    let session = match session.map(|value| value.to_str()).transpose() {
+        Ok(value) => value,
+        Err(_) => {
+            return error(
                 StatusCode::BAD_REQUEST,
                 "invalid_session",
                 "Invalid session header.",
-            ),
-        },
+            )
+        }
+    };
+    let instance = match instance.map(|value| value.to_str()).transpose() {
+        Ok(value) => value,
+        Err(_) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "invalid_instance",
+                "Invalid instance header.",
+            )
+        }
+    };
+    state
+        .engine
+        .route_measured(body, session, instance, Some(bytes))
+        .await
+}
+
+/// Count the actual JSON body, including whitespace and UTF-8, while retaining
+/// Axum's normal content-type, JSON validation and request-size enforcement.
+struct MeasuredJson {
+    body: Value,
+    bytes: u64,
+}
+impl<S: Send + Sync> FromRequest<S> for MeasuredJson {
+    type Rejection = Response;
+    async fn from_request(request: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let (parts, body) = request.into_parts();
+        let bytes = Bytes::from_request(Request::from_parts(parts.clone(), body), state)
+            .await
+            .map_err(IntoResponse::into_response)?;
+        let size = bytes.len() as u64;
+        let Json(body) =
+            Json::<Value>::from_request(Request::from_parts(parts, Body::from(bytes)), state)
+                .await
+                .map_err(IntoResponse::into_response)?;
+        Ok(Self { body, bytes: size })
     }
 }
 

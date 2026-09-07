@@ -110,6 +110,7 @@ struct Fixture {
     usage: Arc<Mutex<Value>>,
     calls: Arc<Mutex<Vec<(String, Value, HeaderMap)>>>,
     limited: Arc<Mutex<Vec<String>>>,
+    record_metrics: bool,
 }
 async fn catalog() -> Json<Value> {
     Json(json!({"object":"list","data":[{"id":MODEL}]}))
@@ -144,6 +145,12 @@ async fn chat(
             "private quota error",
         )
             .into_response();
+    }
+    if f.record_metrics {
+        let mut usage = f.usage.lock().unwrap();
+        usage["usage"]["rolling"]["percent"] = json!(10.25);
+        usage["usage"]["weekly"]["percent"] = json!(50.125);
+        return Json(json!({"choices":[{"message":{"role":"assistant","content":"private measurement fixture"}}],"usage":{"prompt_tokens":200,"completion_tokens":50,"total_tokens":250}})).into_response();
     }
     if body["stream"] == true {
         return ([("content-type", "text/event-stream")], "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"fixture\",\"type\":\"function\",\"function\":{\"name\":\"example\",\"arguments\":\"{}\"}}]}}]}\n\ndata: [DONE]\n\n").into_response();
@@ -212,6 +219,7 @@ async fn engine(server: &Server, clock: Arc<AtomicI64>) -> Arc<RouterEngine> {
             RouterSettings {
                 enabled: true,
                 pools: vec![ModelPool {
+                    mode: Default::default(),
                     name: MODEL.into(),
                     members: ["go", "cloud"]
                         .into_iter()
@@ -233,6 +241,61 @@ async fn engine(server: &Server, clock: Arc<AtomicI64>) -> Arc<RouterEngine> {
 }
 fn prompt() -> Value {
     json!({"model":MODEL,"messages":[{"role":"user","content":"fictional fixture"}],"tools":[{"type":"function","function":{"name":"example","parameters":{"type":"object"}}}]})
+}
+
+#[tokio::test]
+async fn go_observes_account_percentage_points_after_completion_without_retaining_bodies() {
+    let fixture = Fixture {
+        usage: Arc::new(Mutex::new(usage())),
+        record_metrics: true,
+        ..Default::default()
+    };
+    let server = server(fixture.clone()).await;
+    let engine = engine(&server, Arc::new(AtomicI64::new(NOW))).await;
+    engine.model_list().await.unwrap();
+    let response = engine.route(prompt()).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    to_bytes(response.into_body(), 4096).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let report = engine.routing_report();
+            if report.recent[0]
+                .metrics
+                .allowance
+                .as_ref()
+                .is_some_and(|reading| {
+                    reading.status != crate::routing::metrics::AllowanceStatus::Pending
+                })
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let report = engine.routing_report();
+    let metrics = &report.recent[0].metrics;
+    assert_eq!(metrics.context_used_percent, Some(0.025));
+    let change = metrics.allowance.as_ref().unwrap();
+    assert!(change.status == crate::routing::metrics::AllowanceStatus::Observed);
+    assert_eq!(
+        change
+            .changes
+            .iter()
+            .map(|window| window.percentage_points)
+            .collect::<Vec<_>>(),
+        vec![0.25, 0.125, 0.0]
+    );
+    assert_eq!(fixture.calls.lock().unwrap().len(), 1);
+    let serialized = serde_json::to_string(&report).unwrap();
+    for private in [
+        "private measurement fixture",
+        "fictional fixture",
+        "fictional_go_key",
+    ] {
+        assert!(!serialized.contains(private));
+    }
 }
 
 #[tokio::test]
@@ -347,6 +410,7 @@ async fn unknown_allowance_unknown_models_and_disabled_accounts_never_generate()
             RouterSettings {
                 enabled: true,
                 pools: vec![ModelPool {
+                    mode: Default::default(),
                     name: MODEL.into(),
                     members: vec![PoolMember {
                         account_id: "go".into(),
@@ -370,6 +434,7 @@ async fn unknown_allowance_unknown_models_and_disabled_accounts_never_generate()
             RouterSettings {
                 enabled: true,
                 pools: vec![ModelPool {
+                    mode: Default::default(),
                     name: MODEL.into(),
                     members: vec![PoolMember {
                         account_id: "go".into(),
@@ -391,6 +456,7 @@ async fn unknown_allowance_unknown_models_and_disabled_accounts_never_generate()
             RouterSettings {
                 enabled: true,
                 pools: vec![ModelPool {
+                    mode: Default::default(),
                     name: MODEL.into(),
                     members: vec![PoolMember {
                         account_id: "go".into(),

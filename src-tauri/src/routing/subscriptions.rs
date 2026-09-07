@@ -3,6 +3,7 @@ use super::engine::{
     PreparedRequest, RouteFailure,
 };
 use super::metadata::{enrich_ollama, InferenceModel, ModelLimits, PublishedLimits};
+use super::metrics::{request_stream_usage, AllowanceSnapshot, AllowanceWindow};
 use crate::model::{number, timestamp, ProviderConfig};
 use async_trait::async_trait;
 use reqwest::{
@@ -193,12 +194,15 @@ impl IInferenceProvider for SubscriptionProvider {
             ));
         }
         let mut headers = HeaderMap::new();
+        let mut allowance_before = None;
         headers.insert(
             "user-agent",
             HeaderValue::from_static(concat!("AI-Usage/", env!("CARGO_PKG_VERSION"))),
         );
         if matches!(self.kind, SubscriptionKind::OpenCodeGo) {
-            check_go_allowance(&self.get(ctx, "usage", &key).await?, ctx.now)?;
+            let usage = self.get(ctx, "usage", &key).await?;
+            check_go_allowance(&usage, ctx.now)?;
+            allowance_before = go_allowance_snapshot(&usage, ctx.now);
             let session = ctx
                 .session_id
                 .filter(|id| super::engine::valid_session(id))
@@ -214,7 +218,9 @@ impl IInferenceProvider for SubscriptionProvider {
         }
         let mut body = request.clone();
         body["model"] = Value::String(upstream.into());
+        request_stream_usage(&mut body);
         Ok(PreparedRequest {
+            allowance_before,
             url: self
                 .base
                 .join("chat/completions")
@@ -224,6 +230,43 @@ impl IInferenceProvider for SubscriptionProvider {
             headers,
         })
     }
+
+    async fn observe_allowance(&self, ctx: &InferenceContext<'_>) -> Option<AllowanceSnapshot> {
+        if !matches!(self.kind, SubscriptionKind::OpenCodeGo) {
+            return None;
+        }
+        let key = self.key(ctx).ok()?;
+        let usage = self.get(ctx, "usage", &key).await.ok()?;
+        go_allowance_snapshot(&usage, ctx.now)
+    }
+}
+
+fn go_allowance_snapshot(value: &Value, checked_at: i64) -> Option<AllowanceSnapshot> {
+    let windows = [
+        ("rolling", "5-hour"),
+        ("weekly", "Weekly"),
+        ("monthly", "Monthly"),
+    ]
+    .into_iter()
+    .map(|(id, label)| {
+        let window = &value["usage"][id];
+        let used_percent = number(&window["percent"]).filter(|v| v.is_finite() && *v >= 0.0)?;
+        let resets_at = timestamp(&window["resetsAt"])?;
+        window["status"]
+            .as_str()
+            .filter(|status| matches!(*status, "ok" | "rate-limited"))?;
+        Some(AllowanceWindow {
+            id,
+            label,
+            used_percent,
+            resets_at,
+        })
+    })
+    .collect::<Option<Vec<_>>>()?;
+    Some(AllowanceSnapshot {
+        checked_at,
+        windows,
+    })
 }
 
 fn check_go_allowance(value: &Value, now: i64) -> Result<(), RouteFailure> {

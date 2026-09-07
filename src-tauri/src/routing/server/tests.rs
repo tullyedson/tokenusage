@@ -21,7 +21,10 @@ use std::{
 use zeroize::Zeroizing;
 
 const CLIENT_KEY: &str = "fictional_local_client_key_for_tests_only_000000";
+mod distribution;
+mod metrics;
 mod reporting;
+mod validation;
 #[derive(Default)]
 struct MemoryStore(StdMutex<BTreeMap<(String, String), String>>);
 impl ISecretStore for MemoryStore {
@@ -147,6 +150,7 @@ impl IInferenceProvider for Adapter {
         let mut body = request.clone();
         body["model"] = json!(upstream);
         Ok(PreparedRequest {
+            allowance_before: None,
             headers: Default::default(),
             url: format!("{}/{}/chat", self.base, ctx.account_id)
                 .parse()
@@ -170,6 +174,7 @@ fn account(id: &str, _model: &str, provider: Arc<dyn IInferenceProvider>) -> Rou
 }
 fn pool(name: &str, entries: &[(&str, &str)]) -> ModelPool {
     ModelPool {
+        mode: Default::default(),
         name: name.into(),
         members: entries
             .iter()

@@ -1,8 +1,10 @@
 //! Bounded, in-memory routing metadata. Never accept request/response bodies or keys.
+use super::config::RouteMode;
+use super::metrics::{AllowanceObservation, AllowanceStatus, CallMetrics, TokenUsage};
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, VecDeque},
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard, Weak},
     time::Instant,
 };
 
@@ -46,6 +48,7 @@ pub struct RouteAttempt {
 pub struct RequestReport {
     pub id: String,
     pub pool: String,
+    pub mode: RouteMode,
     pub started_at: i64,
     pub finished_at: Option<i64>,
     pub duration_ms: u64,
@@ -58,6 +61,7 @@ pub struct RequestReport {
     pub fallback_count: usize,
     pub http_status: Option<u16>,
     pub message: &'static str,
+    pub metrics: CallMetrics,
 }
 
 #[derive(Serialize)]
@@ -122,6 +126,7 @@ impl RoutingReports {
                 report: RequestReport {
                     id: id.clone(),
                     pool,
+                    mode: RouteMode::Failover,
                     started_at: chrono::Utc::now().timestamp(),
                     finished_at: None,
                     duration_ms: 0,
@@ -133,6 +138,7 @@ impl RoutingReports {
                     fallback_count: 0,
                     http_status: None,
                     message: "Finding the requested model pool.",
+                    metrics: CallMetrics::default(),
                 },
             },
         );
@@ -155,14 +161,63 @@ impl RequestTrace {
     pub fn id(&self) -> &str {
         &self.id
     }
+    pub fn request_bytes(&self, bytes: Option<u64>) {
+        self.update(|report| report.metrics.request_bytes = bytes);
+    }
+    pub fn response_started(&self) {
+        self.update(|report| report.metrics.response_bytes = Some(0));
+    }
+    pub fn response_bytes(&self, bytes: usize) {
+        self.update(|report| {
+            report.metrics.response_bytes = Some(
+                report
+                    .metrics
+                    .response_bytes
+                    .unwrap_or(0)
+                    .saturating_add(bytes as u64),
+            )
+        });
+    }
+    pub fn tokens(&self, tokens: Option<TokenUsage>) {
+        self.update(|report| {
+            report.metrics.tokens = tokens;
+            report.metrics.context_percentage();
+        });
+    }
+    pub fn context_limit(&self, limit: Option<u64>) {
+        self.update(|report| {
+            report.metrics.context_limit = limit;
+            report.metrics.context_percentage();
+        });
+    }
+    pub fn allowance_update(&self) -> AllowanceUpdate {
+        self.update(|report| {
+            report.metrics.allowance = Some(AllowanceObservation {
+                status: AllowanceStatus::Pending,
+                changes: vec![],
+            })
+        });
+        AllowanceUpdate {
+            reports: Arc::downgrade(&self.reports),
+            id: self.id.clone(),
+        }
+    }
     fn update(&self, change: impl FnOnce(&mut RequestReport)) {
         if let Some(active) = self.reports.lock().active.get_mut(&self.id) {
             change(&mut active.report);
         }
     }
+    pub fn selection(&self, mode: RouteMode, previous_attempts: usize) {
+        self.update(|report| {
+            report.mode = mode;
+            report.fallback_count = previous_attempts;
+        });
+    }
     pub fn progress(&self, target: RouteTarget, status: RequestStatus, message: &'static str) {
         self.update(|report| {
-            report.fallback_count = target.position.saturating_sub(1);
+            if report.mode == RouteMode::Failover {
+                report.fallback_count = target.position.saturating_sub(1);
+            }
             report.target = Some(target);
             report.status = status;
             report.message = message;
@@ -176,7 +231,9 @@ impl RequestTrace {
         retry_at: Option<i64>,
     ) {
         self.update(|report| {
-            report.fallback_count = target.position.saturating_sub(1);
+            if report.mode == RouteMode::Failover {
+                report.fallback_count = target.position.saturating_sub(1);
+            }
             if outcome == "skipped" {
                 report.target = None;
             }
@@ -214,6 +271,25 @@ impl RequestTrace {
         self.finished = true;
     }
 }
+
+/// A bounded, late quota read may update an existing report, never recreate a cleared one.
+pub struct AllowanceUpdate {
+    reports: Weak<RoutingReports>,
+    id: String,
+}
+impl AllowanceUpdate {
+    pub fn set(&self, observation: AllowanceObservation) {
+        let Some(reports) = self.reports.upgrade() else {
+            return;
+        };
+        let mut state = reports.lock();
+        if let Some(active) = state.active.get_mut(&self.id) {
+            active.report.metrics.allowance = Some(observation);
+        } else if let Some(recent) = state.recent.iter_mut().find(|report| report.id == self.id) {
+            recent.metrics.allowance = Some(observation);
+        }
+    }
+}
 impl Drop for RequestTrace {
     fn drop(&mut self) {
         if !self.finished {
@@ -232,6 +308,27 @@ fn elapsed(started: Instant) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn late_allowance_updates_finish_existing_rows_but_never_resurrect_cleared_history() {
+        let reports = Arc::new(RoutingReports::default());
+        let trace = reports.begin("pool".into(), false);
+        let update = trace.allowance_update();
+        trace.finish(RequestStatus::Completed, Some(200), "Completed.");
+        update.set(AllowanceObservation::unavailable());
+        assert!(
+            reports.snapshot().recent[0]
+                .metrics
+                .allowance
+                .as_ref()
+                .unwrap()
+                .status
+                == AllowanceStatus::Unavailable
+        );
+        reports.clear_history();
+        update.set(AllowanceObservation::unavailable());
+        assert!(reports.snapshot().recent.is_empty());
+        assert!(reports.snapshot().active.is_empty());
+    }
     #[test]
     fn history_is_bounded_and_clearing_never_loses_active_requests() {
         let reports = Arc::new(RoutingReports::default());

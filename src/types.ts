@@ -4,7 +4,8 @@ export type SettingField = { key: string; label: string; kind: string; help: str
 export type ProviderDefinition = { id: string; name: string; category: Category; initials: string; color: string; description: string; helpUrl: string; fields: SettingField[] };
 export type AccountRouting = { enabled: boolean };
 export type PoolMember = { accountId: string; model: string };
-export type ModelPool = { name: string; members: PoolMember[] };
+export type RouteMode = "failover" | "loadDistribution";
+export type ModelPool = { name: string; mode: RouteMode; members: PoolMember[] };
 export type ModelLimits = { context: number | null; input: number | null; output: number | null };
 export type InferenceModel = { id: string; limits: ModelLimits };
 export type AvailablePool = ModelPool & { automatic: boolean; available: boolean; limits: ModelLimits };
@@ -21,7 +22,10 @@ export type Unsubscribe = () => void;
 export type RequestStatus = "routing" | "waiting" | "checking" | "connecting" | "streaming" | "completed" | "failed" | "cancelled";
 export type RouteTarget = { accountId: string; accountLabel: string; providerId: string; model: string; position: number };
 export type RouteAttempt = { target: RouteTarget; outcome: "selected" | "skipped" | "failed"; reason: string; retryAt: number | null };
-export type RequestReport = { id: string; pool: string; startedAt: number; finishedAt: number | null; durationMs: number; streaming: boolean; status: RequestStatus; target: RouteTarget | null; attempts: RouteAttempt[]; omittedAttempts: number; fallbackCount: number; httpStatus: number | null; message: string };
+export type TokenUsage = { input: number | null; output: number | null; total: number | null; cachedInput: number | null; reasoning: number | null };
+export type AllowanceObservation = { status: "pending" | "observed" | "unavailable"; changes: { label: string; beforePercent: number; afterPercent: number; percentagePoints: number }[] };
+export type CallMetrics = { requestBytes: number | null; responseBytes: number | null; tokens: TokenUsage | null; contextLimit: number | null; contextUsedPercent: number | null; allowance: AllowanceObservation | null };
+export type RequestReport = { id: string; pool: string; mode: RouteMode; startedAt: number; finishedAt: number | null; durationMs: number; streaming: boolean; status: RequestStatus; target: RouteTarget | null; attempts: RouteAttempt[]; omittedAttempts: number; fallbackCount: number; httpStatus: number | null; message: string; metrics: CallMetrics };
 export type RoutingReport = { active: RequestReport[]; recent: RequestReport[]; historyLimit: number; attemptLimit: number };
 
 export interface IUsageAppApi {

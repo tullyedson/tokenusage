@@ -1,5 +1,15 @@
 # Verification record
 
+## Version 0.6.0 routing reports
+
+On September 6, 2026, 51 Rust tests and 30 frontend tests passed with strict Clippy and TypeScript/Vite production compilation. The Reports tab shows concurrent active pool requests, selected account/provider/model, lifecycle stages, elapsed times and recent expandable fallback steps. History is capped at 100 finished requests and 64 steps per request; clearing history preserves active requests.
+
+Native HTTP fixtures verify live streaming destination metadata, quota fallback and restoration of the preferred entry after reset, caller disconnect, cancellation of a queued future, successful streams, terminal error streams and truncation. Forwarded SSE bytes remain unchanged apart from existing pool aliasing. Report serialization excludes fictional prompts, completions, keys, session IDs, URLs and raw upstream error bodies. A streaming HTTP 200 is not counted as successful completion by itself.
+
+Frontend tests cover simultaneous pipelines, provider/account/model display, search and result filters, expansion across refreshes, clear-history failures, stale reads after clearing or remounting, metadata escaping and polling cleanup on navigation. The main app integration test exercises the real Reports tab and native command name. The populated page at 980 pixels and empty page at 680 pixels were inspected in isolated headless Edge profiles without controlling the owner's desktop. Reports commands are restricted to the local main window, with no HTTP report endpoint or provider-specific UI branches.
+
+The final 0.6.0 NSIS build passed archive integrity, product-version and full payload comparison, differing from the optimized build only in Tauri's three-byte UNK-to-NSS marker. It was installed silently while the router had no open client connections. The installed executable exactly matches that payload; settings were preserved byte-for-byte, startup preferences were unchanged, and one tray process restarted hidden. A neutral live request to the existing local vLLM Qwen model succeeded with the requested model name, correct account header and new report request ID. The router and OpenCode each expose 46 models after the upgrade; OpenCode configuration and auth hashes remain unchanged. No cloud generation or real quota depletion was induced for this reporting update. Native report controls remain covered by the command/UI tests rather than desktop interaction.
+
 ## Version 0.5.1 model pools
 
 On September 6, 2026, 46 Rust tests and 25 frontend tests passed, with strict Clippy, production TypeScript/Vite compilation and NSIS packaging. Pool tests cover exact order across different models/providers, return after reset, automatic catalogs, cache expiry and stale/error handling, disabled accounts, custom overrides, version 1/2 migration, UTF-8 SSE chunk boundaries, tool-call preservation and stable response model names. Existing no-paid-request, local-model verification, credential isolation, cancellation and no-replay regressions pass.

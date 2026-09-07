@@ -1,6 +1,7 @@
 use super::{
     catalog::{self, CatalogContext, ModelCatalog, ModelLibrary},
     config::RouterSettings,
+    reports::{RequestStatus, RequestTrace, RouteTarget, RoutingReport, RoutingReports},
 };
 use crate::{credentials::ISecretStore, model::ProviderConfig};
 use async_trait::async_trait;
@@ -89,6 +90,7 @@ pub struct RouterEngine {
     concurrency: Arc<Semaphore>,
     clock: Arc<dyn Fn() -> i64 + Send + Sync>,
     catalog: ModelCatalog,
+    reports: Arc<RoutingReports>,
 }
 
 impl RouterEngine {
@@ -111,6 +113,7 @@ impl RouterEngine {
             concurrency: Arc::new(Semaphore::new(8)),
             clock: Arc::new(|| chrono::Utc::now().timestamp()),
             catalog: ModelCatalog::default(),
+            reports: Arc::new(RoutingReports::default()),
         }
     }
     #[cfg(test)]
@@ -168,6 +171,12 @@ impl RouterEngine {
     }
     pub async fn cancel_requests(&self) {
         self.config.read().await.cancelled.cancel();
+    }
+    pub fn routing_report(&self) -> RoutingReport {
+        self.reports.snapshot()
+    }
+    pub fn clear_routing_history(&self) {
+        self.reports.clear_history();
     }
     pub async fn cancellation(&self) -> CancellationToken {
         self.config.read().await.cancelled.clone()
@@ -229,6 +238,47 @@ impl RouterEngine {
                 )
             }
         };
+        let started = self
+            .reports
+            .begin(requested, request["stream"].as_bool().unwrap_or(false));
+        let request_id = started.id().to_owned();
+        let mut trace = Some(started);
+        let mut response = self
+            .route_tracked(request, session, config, permit, &mut trace)
+            .await;
+        if let Some(trace) = trace {
+            let status = response.status().as_u16();
+            let (outcome, message) = match status {
+                200..=299 => (RequestStatus::Completed, "Completion received."),
+                503 => (RequestStatus::Cancelled, "Routing configuration changed."),
+                404 => (RequestStatus::Failed, "No model pool has this name. Refresh models or check the client model name."),
+                429 => (RequestStatus::Failed, "Every pool entry is unavailable. Expand the routing steps for reasons and retry times."),
+                504 => (RequestStatus::Failed, "The routing request timed out."),
+                400 => (RequestStatus::Failed, "The pool is empty or the selected provider cannot serve this request."),
+                _ => (RequestStatus::Failed, "The upstream request failed or returned an invalid response. It was not replayed."),
+            };
+            trace.finish(outcome, Some(status), message);
+        }
+        if let Ok(value) = HeaderValue::from_str(&request_id) {
+            response
+                .headers_mut()
+                .insert("x-ai-usage-request-id", value);
+        }
+        response
+    }
+
+    async fn route_tracked(
+        self: &Arc<Self>,
+        request: Value,
+        session: String,
+        config: Configuration,
+        permit: tokio::sync::OwnedSemaphorePermit,
+        trace: &mut Option<RequestTrace>,
+    ) -> Response {
+        let requested = request["model"]
+            .as_str()
+            .expect("Validated model")
+            .to_owned();
         let mut reasons = Vec::new();
         let mut next_retry = None;
         let deadline = tokio::time::sleep(Duration::from_secs(180));
@@ -258,16 +308,44 @@ impl RouterEngine {
                 "This model pool is empty. Add provider models on the Models page, then save.",
             );
         }
-        for member in &pool.members {
+        for (index, member) in pool.members.iter().enumerate() {
+            let mut target = RouteTarget {
+                account_id: member.account_id.clone(),
+                account_label: String::new(),
+                provider_id: String::new(),
+                model: member.model.clone(),
+                position: index + 1,
+            };
             let Some(account) = config
                 .accounts
                 .iter()
                 .find(|account| account.id == member.account_id)
             else {
+                trace.as_ref().expect("Active report").attempt(
+                    target,
+                    "skipped",
+                    "Account is not connected for routing. Open Settings.",
+                    None,
+                );
                 reasons.push(json!({"account":member.account_id,"model":member.model,"reason":"Account is not connected for routing. Open Settings."}));
                 continue;
             };
+            target.account_label = account.config.label.clone();
+            target.provider_id = account.config.provider_type(&account.id).to_owned();
             if let Some(reason) = catalog::account_issue(account) {
+                let report_reason = if !account.config.enabled {
+                    "Account is disabled. Enable it in Settings."
+                } else if !account.config.routing.enabled {
+                    "This account is excluded from model pools. Enable it in Settings."
+                } else {
+                    "Account setup is incomplete or invalid. Open Settings."
+                };
+                trace.as_ref().expect("Active report").attempt(
+                    target,
+                    "skipped",
+                    report_reason,
+                    None,
+                );
                 reasons.push(json!({"account":account.id,"model":member.model,"reason":reason}));
                 continue;
             }
@@ -285,11 +363,22 @@ impl RouterEngine {
                 .filter(|until| *until > now)
             };
             if let Some(until) = cooldown {
+                trace.as_ref().expect("Active report").attempt(
+                    target,
+                    "skipped",
+                    "Waiting for the next quota or availability check.",
+                    Some(until),
+                );
                 next_retry = Some(next_retry.map_or(until, |old: i64| old.min(until)));
                 reasons.push(json!({"account":account.id,"model":member.model,"reason":"Waiting for the next quota or availability check.","retry_at":until}));
                 continue;
             }
             let cancelled = &config.cancelled;
+            trace.as_ref().expect("Active report").progress(
+                target.clone(),
+                RequestStatus::Waiting,
+                "Waiting for this account's earlier request to finish.",
+            );
             let serial = tokio::select! {
                 biased;
                 _ = cancelled.cancelled() => return cancelled_response(),
@@ -309,6 +398,12 @@ impl RouterEngine {
                 .map(|(_, until)| *until)
                 .max();
             if let Some(until) = blocked {
+                trace.as_ref().expect("Active report").attempt(
+                    target,
+                    "skipped",
+                    "A preceding request reached this account's limit.",
+                    Some(until),
+                );
                 next_retry = Some(next_retry.map_or(until, |old: i64| old.min(until)));
                 reasons.push(json!({"account":account.id,"model":member.model,"reason":"A preceding request reached this account's limit.","retry_at":until}));
                 continue;
@@ -321,6 +416,11 @@ impl RouterEngine {
                 now,
                 session_id: Some(&session),
             };
+            trace.as_ref().expect("Active report").progress(
+                target.clone(),
+                RequestStatus::Checking,
+                "Checking model and included allowance eligibility.",
+            );
             let prepared = tokio::select! {
                 biased;
                 _ = cancelled.cancelled() => return cancelled_response(),
@@ -328,12 +428,19 @@ impl RouterEngine {
                 result = account.provider.prepare(&context, &request, &member.model) => result,
             };
             let result = match prepared {
-                Ok(prepared) => tokio::select! {
+                Ok(prepared) => {
+                    trace.as_ref().expect("Active report").progress(
+                        target.clone(),
+                        RequestStatus::Connecting,
+                        "Contacting this provider. Waiting for its response.",
+                    );
+                    tokio::select! {
                     biased;
                     _ = cancelled.cancelled() => return cancelled_response(),
                     _ = &mut deadline => return error(StatusCode::GATEWAY_TIMEOUT, "timeout", "Routing timed out."),
                     result = send(&self.client, prepared, (self.clock)()) => result,
-                },
+                    }
+                }
                 Err(failure) => Err(failure),
             };
             match result {
@@ -341,6 +448,12 @@ impl RouterEngine {
                     if cancelled.is_cancelled() {
                         return cancelled_response();
                     }
+                    trace.as_ref().expect("Active report").attempt(
+                        target.clone(),
+                        "selected",
+                        "Provider accepted the request.",
+                        None,
+                    );
                     let stream = request["stream"].as_bool().unwrap_or(false);
                     let content_type = response
                         .headers()
@@ -355,6 +468,12 @@ impl RouterEngine {
                         );
                     }
                     let mut output = if stream {
+                        let stream_trace = trace.take().expect("Active report");
+                        stream_trace.progress(
+                            target,
+                            RequestStatus::Streaming,
+                            "Receiving the provider's response stream.",
+                        );
                         let cancel = cancelled.clone();
                         let alias = requested.clone();
                         let (sender, receiver) =
@@ -366,7 +485,7 @@ impl RouterEngine {
                             let mut aliases = super::stream::AliasStream::default();
                             loop {
                                 let result = tokio::select! {
-                                    _ = cancel.cancelled() => { let _ = sender.try_send(Err(std::io::Error::other("Routing configuration changed."))); return; },
+                                    _ = cancel.cancelled() => { let _ = sender.try_send(Err(std::io::Error::other("Routing configuration changed."))); stream_trace.finish(RequestStatus::Cancelled, Some(200), "Routing configuration changed during the stream."); return; },
                                     _ = sender.closed() => return,
                                     result = response.chunk() => result,
                                 };
@@ -375,11 +494,10 @@ impl RouterEngine {
                                     Ok(Some(bytes)) => {
                                         aliases.push(&bytes, &alias).map(Bytes::from)
                                     }
-                                    Ok(None) => {
-                                        Ok(Bytes::from(std::mem::take(&mut aliases).finish(&alias)))
-                                    }
+                                    Ok(None) => Ok(Bytes::from(aliases.finish(&alias))),
                                     Err(_) => {
                                         let _ = sender.try_send(Err(std::io::Error::other("Upstream stream interrupted; request was not replayed.")));
+                                        stream_trace.finish(RequestStatus::Failed, Some(200), "Upstream stream interrupted; request was not replayed.");
                                         return;
                                     }
                                 };
@@ -388,10 +506,19 @@ impl RouterEngine {
                                     continue;
                                 }
                                 tokio::select! {
-                                    _ = cancel.cancelled() => { let _ = sender.try_send(Err(std::io::Error::other("Routing configuration changed."))); return; },
+                                    _ = cancel.cancelled() => { let _ = sender.try_send(Err(std::io::Error::other("Routing configuration changed."))); stream_trace.finish(RequestStatus::Cancelled, Some(200), "Routing configuration changed during the stream."); return; },
                                     result = sender.send(item) => if result.is_err() { return; },
                                 }
                                 if finished || failed {
+                                    if !failed && aliases.completed() {
+                                        stream_trace.finish(
+                                            RequestStatus::Completed,
+                                            Some(200),
+                                            "Provider stream completed.",
+                                        );
+                                    } else {
+                                        stream_trace.finish(RequestStatus::Failed, Some(200), "The stream ended with an error or without a completion marker; request was not replayed.");
+                                    }
                                     return;
                                 }
                             }
@@ -431,6 +558,12 @@ impl RouterEngine {
                     account_wide,
                 }) => {
                     let until = retry_at.max((self.clock)() + 1);
+                    trace.as_ref().expect("Active report").attempt(
+                        target,
+                        "skipped",
+                        reason,
+                        Some(until),
+                    );
                     let mut cooldowns = self.cooldowns.lock().await;
                     // Configuration changes cancel first, then clear this same map.
                     // Check under its lock so a late error cannot block a new account revision.
@@ -453,10 +586,18 @@ impl RouterEngine {
                         .push(json!({"account":account.id,"model":member.model,"reason":reason}));
                 }
                 Err(RouteFailure::Invalid(message)) => {
-                    return error(StatusCode::BAD_REQUEST, "unsupported_request", message)
+                    trace
+                        .as_ref()
+                        .expect("Active report")
+                        .attempt(target, "failed", message, None);
+                    return error(StatusCode::BAD_REQUEST, "unsupported_request", message);
                 }
                 Err(RouteFailure::Failed(message)) => {
-                    return error(StatusCode::BAD_GATEWAY, "upstream_failed", message)
+                    trace
+                        .as_ref()
+                        .expect("Active report")
+                        .attempt(target, "failed", message, None);
+                    return error(StatusCode::BAD_GATEWAY, "upstream_failed", message);
                 }
             }
         }

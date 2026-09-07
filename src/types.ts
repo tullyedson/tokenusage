@@ -1,4 +1,4 @@
-export type Page = "usage" | "settings" | "routing" | "models";
+export type Page = "usage" | "settings" | "routing" | "models" | "reports";
 export type Category = "llm" | "music" | "speech" | "media";
 export type SettingField = { key: string; label: string; kind: string; help: string; placeholder: string; options: { value: string; label: string }[] };
 export type ProviderDefinition = { id: string; name: string; category: Category; initials: string; color: string; description: string; helpUrl: string; fields: SettingField[] };
@@ -16,6 +16,11 @@ export type UsageSnapshot = { meters: UsageMeter[]; plan: string | null; note: s
 export type ProviderReport = { providerId: string; snapshot: UsageSnapshot | null; updatedAt: number | null; attemptedAt: number | null; error: string | null; refreshing: boolean };
 export type Bootstrap = { providers: ProviderDefinition[]; settings: Settings; reports: ProviderReport[]; startupError: string | null; configuredSecrets: Record<string, string[]>; inference: Record<string, { description: string }>; router: { running: boolean; baseUrl: string; tokenConfigured: boolean; error: string | null } };
 export type Unsubscribe = () => void;
+export type RequestStatus = "routing" | "waiting" | "checking" | "connecting" | "streaming" | "completed" | "failed" | "cancelled";
+export type RouteTarget = { accountId: string; accountLabel: string; providerId: string; model: string; position: number };
+export type RouteAttempt = { target: RouteTarget; outcome: "selected" | "skipped" | "failed"; reason: string; retryAt: number | null };
+export type RequestReport = { id: string; pool: string; startedAt: number; finishedAt: number | null; durationMs: number; streaming: boolean; status: RequestStatus; target: RouteTarget | null; attempts: RouteAttempt[]; omittedAttempts: number; fallbackCount: number; httpStatus: number | null; message: string };
+export type RoutingReport = { active: RequestReport[]; recent: RequestReport[]; historyLimit: number; attemptLimit: number };
 
 export interface IUsageAppApi {
   bootstrap(): Promise<Bootstrap>;
@@ -27,6 +32,8 @@ export interface IUsageAppApi {
   discoverModels(providerId: string): Promise<string[]>;
   modelLibrary(force?: boolean): Promise<ModelLibrary>;
   saveModelPools(pools: ModelPool[]): Promise<void>;
+  routingReport(): Promise<RoutingReport>;
+  clearRoutingHistory(): Promise<void>;
   connect(providerId: string): Promise<string>;
   forget(providerId: string): Promise<void>;
   savePreferences(refreshMinutes: number): Promise<void>;

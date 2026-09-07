@@ -4,6 +4,7 @@ pub mod engine;
 mod legacy;
 pub(crate) mod migration;
 pub mod providers;
+pub mod reports;
 mod server;
 mod stream;
 pub mod subscriptions;

@@ -5,9 +5,11 @@ import { clearSecretInputs, readFields, renderField } from "./settings-form";
 import { accountRouting, readAccountRouting, readRouting, routingPage } from "./routing-form";
 import type { Bootstrap, Category, IUsageAppApi, Page, ProviderDefinition, ProviderReport, SettingField, Unsubscribe, UsageMeter } from "./types";
 import { ModelsPage } from "./models-page";
+import { ReportsPage } from "./reports-page";
 import { version } from "../package.json";
 import "./style.css";
 import "./routing.css";
+import "./reports.css";
 
 const root = document.querySelector<HTMLDivElement>("#app");
 if (!root) throw new Error("App root missing");
@@ -20,6 +22,7 @@ const categories: { id: Category; title: string; description: string; icon: stri
 ];
 let api: IUsageAppApi;
 let modelsPage: ModelsPage;
+let reportsPage: ReportsPage;
 let data: Bootstrap;
 let page: Page = "usage";
 let preview = false;
@@ -49,14 +52,14 @@ function errorMessage(error: unknown): string { return error instanceof Error ? 
 function renderShell(): void {
   appRoot.innerHTML = `${preview ? '<div class="preview-banner">Browser preview · Sample readings, no accounts connected</div>' : ""}
     <header class="app-header"><a class="brand" href="#usage">${logo()}<span>AI Usage</span></a>
-      <nav aria-label="Main"><button type="button" data-page="usage">Usage</button><button type="button" data-page="models">Models</button><button type="button" data-page="routing">Routing</button><button type="button" data-page="settings">Settings</button></nav>
+      <nav aria-label="Main"><button type="button" data-page="usage">Usage</button><button type="button" data-page="models">Models</button><button type="button" data-page="reports">Reports</button><button type="button" data-page="routing">Routing</button><button type="button" data-page="settings">Settings</button></nav>
       <span class="tray-note"><span class="live-dot"></span>In your tray</span>
     </header>
     <main id="content"></main>
     <footer><span>Private to this Windows account</span><span>AI Usage <span class="version">${esc(version)}</span></span></footer>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <dialog id="forget-dialog"><form method="dialog"><span class="eyebrow">DISCONNECT PROVIDER</span><h2>Forget this connection?</h2><p>This clears this app’s saved key, website session and settings for the provider. Your subscription stays active.</p><div class="form-actions"><button value="cancel" class="secondary">Cancel</button><button value="forget" class="danger">Forget connection</button></div></form></dialog>`;
-  appRoot.querySelectorAll<HTMLButtonElement>("[data-page]").forEach(button => button.addEventListener("click", () => navigate(button.dataset.page === "models" ? "models" : button.dataset.page === "settings" ? "settings" : button.dataset.page === "routing" ? "routing" : "usage")));
+  appRoot.querySelectorAll<HTMLButtonElement>("[data-page]").forEach(button => button.addEventListener("click", () => navigate(button.dataset.page === "reports" ? "reports" : button.dataset.page === "models" ? "models" : button.dataset.page === "settings" ? "settings" : button.dataset.page === "routing" ? "routing" : "usage")));
   appRoot.querySelector(".brand")?.addEventListener("click", event => { event.preventDefault(); navigate("usage"); });
   renderPage();
 }
@@ -70,7 +73,9 @@ function renderPage(): void {
   const content = appRoot.querySelector<HTMLElement>("#content");
   if (!content) return;
   modelsPage.unmount();
+  reportsPage.unmount();
   if (page === "models") { modelsPage.mount(content, data); }
+  else if (page === "reports") { reportsPage.mount(content, data); }
   else if (page === "settings") { content.innerHTML = settingsPage(); bindSettings(); }
   else if (page === "routing") { content.innerHTML = routingPage(data); bindRouting(); }
   else { content.innerHTML = usagePage(); bindUsage(); }
@@ -252,13 +257,14 @@ async function start(): Promise<void> {
   else if (import.meta.env.DEV) { const { PreviewApi } = await import("./preview"); api = new PreviewApi(); preview = true; }
   else throw new Error("Open the installed AI Usage desktop app to connect your accounts.");
   modelsPage = new ModelsPage(api, notify);
+  reportsPage = new ReportsPage(api);
   subscriptions.push(await api.onUsage(reports => { if (!data) return; data.reports = reports; if (page === "usage") renderPage(); else updateSetupStatus(); }));
   subscriptions.push(await api.onSettings(() => { void reloadData().then(() => { if (page === "usage") renderPage(); else updateSetupStatus(); }).catch(error => notify(errorMessage(error), true)); }));
   subscriptions.push(await api.onPage(next => { if (data) navigate(next); else page = next; }));
   const [bootstrap, initialPage] = await Promise.all([api.bootstrap(), api.currentPage()]);
   data = bootstrap; page = initialPage; renderShell();
 }
-window.addEventListener("beforeunload", () => { subscriptions.forEach(unsubscribe => unsubscribe()); if (toastTimer) clearTimeout(toastTimer); });
+window.addEventListener("beforeunload", () => { reportsPage?.unmount(); subscriptions.forEach(unsubscribe => unsubscribe()); if (toastTimer) clearTimeout(toastTimer); });
 void start().catch(error => {
   appRoot.innerHTML = `<div class="boot-error"><h1>AI Usage</h1><p>${esc(errorMessage(error))}</p><button id="retry" class="secondary">Try again</button></div>`;
   appRoot.querySelector("#retry")?.addEventListener("click", () => location.reload());

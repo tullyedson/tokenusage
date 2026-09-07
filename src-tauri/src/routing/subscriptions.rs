@@ -2,6 +2,7 @@ use super::engine::{
     read_json, retry_time, IInferenceProvider, InferenceContext, InferenceDefinition,
     PreparedRequest, RouteFailure,
 };
+use super::metadata::{enrich_ollama, InferenceModel, ModelLimits, PublishedLimits};
 use crate::model::{number, timestamp, ProviderConfig};
 use async_trait::async_trait;
 use reqwest::{
@@ -9,7 +10,7 @@ use reqwest::{
     Url,
 };
 use serde_json::Value;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use zeroize::Zeroizing;
 
 #[derive(Clone, Copy)]
@@ -21,12 +22,14 @@ pub enum SubscriptionKind {
 pub struct SubscriptionProvider {
     kind: SubscriptionKind,
     base: Url,
+    metadata: Arc<PublishedLimits>,
 }
 
 impl SubscriptionProvider {
     pub fn new(kind: SubscriptionKind) -> Self {
         Self {
             kind,
+            metadata: PublishedLimits::shared(),
             base: match kind {
                 SubscriptionKind::OpenCodeGo => "https://opencode.ai/zen/go/v1/",
                 SubscriptionKind::OllamaCloud => "https://ollama.com/v1/",
@@ -90,7 +93,7 @@ impl SubscriptionProvider {
         &self,
         ctx: &InferenceContext<'_>,
         key: &str,
-    ) -> Result<Vec<String>, RouteFailure> {
+    ) -> Result<Vec<InferenceModel>, RouteFailure> {
         let value = self.get(ctx, "models", key).await?;
         let rows = value["data"].as_array().ok_or_else(|| {
             unavailable(
@@ -101,10 +104,16 @@ impl SubscriptionProvider {
         })?;
         Ok(rows
             .iter()
-            .filter_map(|row| row["id"].as_str())
-            .filter(|id| super::config::valid_model(id))
+            .filter_map(|row| {
+                row["id"]
+                    .as_str()
+                    .filter(|id| super::config::valid_model(id))
+                    .map(|id| InferenceModel {
+                        id: id.into(),
+                        limits: ModelLimits::from_catalog(row),
+                    })
+            })
             .take(4096)
-            .map(str::to_owned)
             .collect())
     }
 }
@@ -132,14 +141,34 @@ impl IInferenceProvider for SubscriptionProvider {
         Ok(())
     }
 
-    async fn models(&self, ctx: &InferenceContext<'_>) -> Result<Vec<String>, String> {
-        self.catalog(ctx, &self.key(ctx)?)
-            .await
-            .map_err(|failure| match failure {
-                RouteFailure::Unavailable { reason, .. }
-                | RouteFailure::Invalid(reason)
-                | RouteFailure::Failed(reason) => reason.into(),
-            })
+    async fn models(&self, ctx: &InferenceContext<'_>) -> Result<Vec<InferenceModel>, String> {
+        let key = self.key(ctx)?;
+        let (catalog, published) = tokio::join!(
+            self.catalog(ctx, &key),
+            self.metadata.read(ctx.client, ctx.now)
+        );
+        let mut models = catalog.map_err(|failure| match failure {
+            RouteFailure::Unavailable { reason, .. }
+            | RouteFailure::Invalid(reason)
+            | RouteFailure::Failed(reason) => reason.to_owned(),
+        })?;
+        let provider = match self.kind {
+            SubscriptionKind::OpenCodeGo => "opencode-go",
+            SubscriptionKind::OllamaCloud => "ollama-cloud",
+        };
+        for model in &mut models {
+            if let Some(limits) = published
+                .get(provider)
+                .and_then(|models| models.get(&model.id))
+            {
+                model.limits = model.limits.fill_missing(*limits);
+            }
+        }
+        if matches!(self.kind, SubscriptionKind::OllamaCloud) {
+            let base = self.base.join("../").expect("Constant Ollama root");
+            enrich_ollama(ctx.client, &base, Some(&key), &mut models, false).await;
+        }
+        Ok(models)
     }
 
     async fn prepare(
@@ -156,7 +185,7 @@ impl IInferenceProvider for SubscriptionProvider {
             )
         })?;
         let catalog = self.catalog(ctx, &key).await?;
-        if !catalog.iter().any(|id| id == upstream) {
+        if !catalog.iter().any(|model| model.id == upstream) {
             return Err(unavailable(
                 "This model is not in the subscription catalog.",
                 ctx.now + 60,

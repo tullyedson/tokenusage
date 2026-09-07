@@ -1,5 +1,14 @@
 # Verification record
 
+## Version 0.6.1 model context metadata
+
+On September 7, 2026, all 57 native tests and 33 frontend tests passed, along with strict Clippy, TypeScript/Vite and the Windows NSIS build. Metadata regressions cover Go/cloud GLM's 1,000,000-token chain, different-context fallbacks, unknown/stale/missing/disabled members, server-versus-trained limits, malformed numbers, exact provider matching, credential-free public caching and replacing OpenCode's old 128k configuration. HTTP tests accept a 2 MiB fictional request through routing and reject a body above 16 MiB. No real long-context generation or quota depletion was performed.
+
+Read-only public verification found GLM-5.3-Flash in both providers' current catalogs. OpenCode's Models.dev Go entry supplies 1,000,000 context and 131,072 output; Ollama's /api/show reports 1,048,576 context and its exact Models.dev entry supplies 131,072 output. No provider credentials or prompts were sent for this public research. The Models page, including its chain-limit summary, was inspected in an isolated hidden browser.
+
+The 0.6.1 installer passes archive integrity and product-version checks. Full executable comparison permits only Tauri's three-byte UNK-to-NSS installer marker. Local upgrade and the actual OpenCode import check are pending an idle router or authorization to interrupt its open client connection.
+
+
 ## Version 0.6.0 routing reports
 
 On September 6, 2026, 51 Rust tests and 30 frontend tests passed with strict Clippy and TypeScript/Vite production compilation. The Reports tab shows concurrent active pool requests, selected account/provider/model, lifecycle stages, elapsed times and recent expandable fallback steps. History is capped at 100 finished requests and 64 steps per request; clearing history preserves active requests.

@@ -1,5 +1,5 @@
 import { escapeHtml as esc } from "./format";
-import type { Bootstrap, IUsageAppApi, ModelLibrary, ModelPool, PoolMember } from "./types";
+import type { Bootstrap, IUsageAppApi, ModelLibrary, ModelLimits, ModelPool, PoolMember } from "./types";
 
 const same = (a: PoolMember, b: PoolMember): boolean => a.accountId === b.accountId && a.model === b.model;
 export const poolName = (value: string): string => value.trim().replace(/\s+/g, "-");
@@ -40,7 +40,7 @@ export class ModelsPage {
   }
   private automatic(): ModelPool[] {
     const pools = new Map<string, ModelPool>();
-    for (const catalog of this.library.catalogs) for (const model of catalog.models) {
+    for (const catalog of this.library.catalogs) for (const { id: model } of catalog.models) {
       const pool = pools.get(model) ?? { name: model, members: [] };
       pool.members.push({ accountId: catalog.accountId, model }); pools.set(model, pool);
     }
@@ -89,18 +89,37 @@ export class ModelsPage {
     } catch (error) { this.notify(error instanceof Error ? error.message : String(error), true); }
     finally { this.saving = false; this.render(); }
   }
+  private limitText(limits: ModelLimits): string {
+    const number = (value: number | null): string => value === null ? "unknown" : value.toLocaleString();
+    return `${number(limits.context)} context · ${number(limits.output)} output`;
+  }
+  private poolLimits(pool: ModelPool): ModelLimits {
+    const limits = pool.members.filter(member => {
+      const config = this.data?.settings.providers[member.accountId];
+      return config?.enabled && config.routing.enabled;
+    }).map(member => {
+      const catalog = this.library.catalogs.find(c => c.accountId === member.accountId && !c.error);
+      return catalog?.models.find(model => model.id === member.model)?.limits;
+    });
+    const lowest = (values: (number | null | undefined)[]): number | null => {
+      if (!values.length || values.some(value => value == null)) return null;
+      return Math.min(...values.filter((value): value is number => value != null));
+    };
+    return { context: lowest(limits.map(limit => limit?.context)), output: lowest(limits.map(limit => limit?.output)), input: null };
+  }
   private catalogHtml(): string {
     const search = this.search.toLowerCase();
     return this.library.catalogs.filter(c => !this.accountFilter || c.accountId === this.accountFilter).map(catalog => {
-      const models = catalog.models.filter(model => `${model} ${this.account(catalog.accountId)}`.toLowerCase().includes(search));
+      const models = catalog.models.filter(model => `${model.id} ${this.account(catalog.accountId)}`.toLowerCase().includes(search));
       if (!models.length && search) return "";
-      return `<section class="catalog-account"><h3>${esc(this.account(catalog.accountId))}<span>${models.length}</span></h3>${catalog.error ? `<p class="catalog-error">${esc(catalog.error)}${catalog.models.length ? " Showing the last catalog; availability is checked before routing." : ""}</p>` : ""}${models.map(model => `<div class="catalog-model" draggable="true" data-catalog-account="${esc(catalog.accountId)}" data-catalog-model="${esc(model)}"><span class="drag-handle" aria-hidden="true">⠿</span><code>${esc(model)}</code><button class="text-button" type="button" data-add-to-pool ${this.selected && !this.saving ? "" : "disabled"} aria-label="Add ${esc(model)} from ${esc(this.account(catalog.accountId))} to selected pool">Add</button></div>`).join("")}${!models.length && !catalog.error ? '<p class="session-note">No eligible models in this catalog.</p>' : ""}</section>`;
+      return `<section class="catalog-account"><h3>${esc(this.account(catalog.accountId))}<span>${models.length}</span></h3>${catalog.error ? `<p class="catalog-error">${esc(catalog.error)}${catalog.models.length ? " Showing the last catalog; availability is checked before routing." : ""}</p>` : ""}${models.map(({ id: model, limits }) => `<div class="catalog-model" draggable="true" data-catalog-account="${esc(catalog.accountId)}" data-catalog-model="${esc(model)}"><span class="drag-handle" aria-hidden="true">⠿</span><div class="model-label"><code>${esc(model)}</code><small>${this.limitText(limits)}</small></div><button class="text-button" type="button" data-add-to-pool ${this.selected && !this.saving ? "" : "disabled"} aria-label="Add ${esc(model)} from ${esc(this.account(catalog.accountId))} to selected pool">Add</button></div>`).join("")}${!models.length && !catalog.error ? '<p class="session-note">No eligible models in this catalog.</p>' : ""}</section>`;
     }).join("") || `<p class="category-empty">${this.loading ? "Reading provider model catalogs…" : "No models found. Connect a supported account in Settings, then refresh models."}</p>`;
   }
   private poolHtml(pool: ModelPool): string {
     const custom = this.custom.some(p => p.name === pool.name);
     const automaticExists = this.automatic().some(p => p.name === pool.name);
-    return `<details class="model-pool ${this.selected === pool.name ? "selected" : ""}" data-pool="${esc(pool.name)}" ${this.opened.has(pool.name) ? "open" : ""}><summary><code>${esc(pool.name)}</code><span class="pool-badge">${custom ? "Custom" : "Automatic"}</span><small>${pool.members.length} ${pool.members.length === 1 ? "entry" : "entries"}</small><span class="chevron">›</span></summary><div class="pool-body"><p class="pool-hint">Try from top to bottom. Return to the first available entry after reset.</p><ol class="pool-members">${pool.members.map((member, index) => `<li draggable="true" data-member-index="${index}"><span class="drag-handle" aria-hidden="true">⠿</span><span class="member-number">${index + 1}</span><div class="member-label"><code>${esc(member.model)}</code><small>${esc(this.account(member.accountId))}</small></div><div class="member-actions"><button type="button" class="text-button" data-up ${index === 0 ? "disabled" : ""} aria-label="Move ${esc(member.model)} up">↑</button><button type="button" class="text-button" data-down ${index === pool.members.length - 1 ? "disabled" : ""} aria-label="Move ${esc(member.model)} down">↓</button><button type="button" class="text-button" data-remove aria-label="Remove ${esc(member.model)}">×</button></div></li>`).join("")}</ol><div class="pool-drop">${pool.members.length ? "Drop another model here" : "Drag models here, or select this pool and use Add on the left."}</div><div class="pool-footer"><button type="button" class="secondary" data-select-pool>${this.selected === pool.name ? "Selected for Add" : "Select for Add"}</button>${custom ? `<button type="button" class="text-button" data-delete-pool>${automaticExists ? "Reset to automatic" : "Delete pool"}</button>` : ""}</div></div></details>`;
+    const limits = this.poolLimits(pool);
+    return `<details class="model-pool ${this.selected === pool.name ? "selected" : ""}" data-pool="${esc(pool.name)}" ${this.opened.has(pool.name) ? "open" : ""}><summary><code>${esc(pool.name)}</code><span class="pool-badge">${custom ? "Custom" : "Automatic"}</span><small>${pool.members.length} ${pool.members.length === 1 ? "entry" : "entries"}</small><span class="chevron">›</span></summary><div class="pool-body"><p class="pool-hint">Try from top to bottom. Return to the first available entry after reset.</p><p class="pool-limits">Chain limit: ${this.limitText(limits)}. Lowest across enabled entries; unknown limits stay unknown.</p><ol class="pool-members">${pool.members.map((member, index) => `<li draggable="true" data-member-index="${index}"><span class="drag-handle" aria-hidden="true">⠿</span><span class="member-number">${index + 1}</span><div class="member-label"><code>${esc(member.model)}</code><small>${esc(this.account(member.accountId))}</small></div><div class="member-actions"><button type="button" class="text-button" data-up ${index === 0 ? "disabled" : ""} aria-label="Move ${esc(member.model)} up">↑</button><button type="button" class="text-button" data-down ${index === pool.members.length - 1 ? "disabled" : ""} aria-label="Move ${esc(member.model)} down">↓</button><button type="button" class="text-button" data-remove aria-label="Remove ${esc(member.model)}">×</button></div></li>`).join("")}</ol><div class="pool-drop">${pool.members.length ? "Drop another model here" : "Drag models here, or select this pool and use Add on the left."}</div><div class="pool-footer"><button type="button" class="secondary" data-select-pool>${this.selected === pool.name ? "Selected for Add" : "Select for Add"}</button>${custom ? `<button type="button" class="text-button" data-delete-pool>${automaticExists ? "Reset to automatic" : "Delete pool"}</button>` : ""}</div></div></details>`;
   }
   private render(): void {
     const root = this.root; if (!root?.isConnected) return;

@@ -124,7 +124,10 @@ impl IInferenceProvider for Adapter {
     fn validate(&self, _: &ProviderConfig) -> Result<(), String> {
         Ok(())
     }
-    async fn models(&self, _: &InferenceContext<'_>) -> Result<Vec<String>, String> {
+    async fn models(
+        &self,
+        _: &InferenceContext<'_>,
+    ) -> Result<Vec<super::super::metadata::InferenceModel>, String> {
         Ok(vec!["server-x".into()])
     }
     async fn prepare(
@@ -456,6 +459,22 @@ async fn local_api_requires_key_and_loopback_host_rejects_browser_origins_and_pa
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    for (bytes, expected) in [
+        (2 * 1024 * 1024, StatusCode::NOT_FOUND),
+        (16 * 1024 * 1024, StatusCode::PAYLOAD_TOO_LARGE),
+    ] {
+        let mut large = request("missing-model");
+        large["messages"][0]["content"] = json!("x".repeat(bytes));
+        let response = client
+            .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
+            .bearer_auth(CLIENT_KEY)
+            .json(&large)
+            .send()
+            .await
+            .unwrap();
+        // The smaller body reaches routing; neither fixture sends a generation.
+        assert_eq!(response.status(), expected);
+    }
     store
         .set(
             "router",

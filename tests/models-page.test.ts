@@ -6,14 +6,14 @@ import type { Bootstrap, ModelLibrary } from "../src/types";
 import desktop from "../src-tauri/tauri.conf.json";
 
 const library: ModelLibrary = { catalogs: [
-  { accountId: "go", models: ["glm-flash", "second-model"], checkedAt: 1000, error: null },
-  { accountId: "cloud", models: ["deepseek-flash", "glm-flash"], checkedAt: 1000, error: null },
-  { accountId: "local", models: ["Qwen"], checkedAt: 1000, error: null },
+  { accountId: "go", models: ["glm-flash", "second-model"].map(id => ({ id, limits: { context: 1000000, input: null, output: 131072 } })), checkedAt: 1000, error: null },
+  { accountId: "cloud", models: ["deepseek-flash", "glm-flash"].map(id => ({ id, limits: { context: 1000000, input: null, output: 131072 } })), checkedAt: 1000, error: null },
+  { accountId: "local", models: ["Qwen"].map(id => ({ id, limits: { context: 1000000, input: null, output: 131072 } })), checkedAt: 1000, error: null },
 ], pools: [] };
 const data: Bootstrap = {
   providers: [], reports: [], configuredSecrets: {}, inference: {}, startupError: null,
   router: { running: true, baseUrl: "http://127.0.0.1:43129/v1", tokenConfigured: true, error: null },
-  settings: { version: 3, refreshMinutes: 5, providers: {}, routing: { enabled: true, port: 43129, pools: [] } },
+  settings: { version: 3, refreshMinutes: 5, providers: Object.fromEntries(["go", "cloud", "local"].map(id => [id, { providerType: id, label: "Fixture", routing: { enabled: true }, enabled: true, fields: {}, sessionGeneration: 0, revision: 0 }])), routing: { enabled: true, port: 43129, pools: [] } },
 };
 afterEach(() => vi.restoreAllMocks());
 function button(selector: string): HTMLButtonElement { return document.querySelector<HTMLButtonElement>(selector)!; }
@@ -37,6 +37,22 @@ function drag(source: Element, target: Element) {
   source.dispatchEvent(new Event("dragstart", { bubbles: true }));
   target.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
 }
+it("shows the lowest chain context while editing and marks missing metadata unknown", async () => {
+  const { read } = await setup(); create("mixed-chain");
+  const target = document.querySelector('[data-pool="mixed-chain"]')!;
+  for (const model of ["glm-flash", "deepseek-flash"]) drag(document.querySelector(`[data-catalog-model="${model}"]`)!, document.querySelector('[data-pool="mixed-chain"]')!);
+  const text = () => document.querySelector('[data-pool="mixed-chain"] .pool-limits')?.textContent;
+  expect(text()).toContain("1,000,000 context");
+  const changed = structuredClone(library);
+  changed.catalogs[1]!.models[0]!.limits.context = 32768;
+  changed.catalogs[1]!.models[0]!.limits.output = 8192;
+  read.mockResolvedValue(changed); button("[data-refresh-models]").click();
+  await vi.waitFor(() => expect(text()).toContain("32,768 context"));
+  changed.catalogs[1]!.error = "Fixture metadata unavailable";
+  button("[data-refresh-models]").click();
+  await vi.waitFor(() => expect(text()).toContain("unknown context"));
+  expect(target.isConnected).toBe(false);
+});
 it("creates a mixed pool, supports drag and keyboard ordering, and saves the exact fallback sequence", async () => {
   // Tauri's native file-drop interception suppresses HTML5 drop events on Windows.
   expect(desktop.app.windows.find(window => window.label === "main")?.dragDropEnabled).toBe(false);

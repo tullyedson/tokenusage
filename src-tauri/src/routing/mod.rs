@@ -2,6 +2,7 @@ pub mod catalog;
 pub mod config;
 pub mod engine;
 mod legacy;
+pub mod metadata;
 pub(crate) mod migration;
 pub mod providers;
 pub mod reports;

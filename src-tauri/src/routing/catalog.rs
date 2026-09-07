@@ -1,6 +1,7 @@
 use super::{
     config::{ModelPool, PoolMember},
     engine::{InferenceContext, RouteAccount},
+    metadata::{InferenceModel, ModelLimits},
 };
 use crate::{credentials::ISecretStore, model::ProviderConfig};
 use futures_util::{stream, FutureExt, StreamExt};
@@ -13,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 #[serde(rename_all = "camelCase")]
 pub struct CatalogReport {
     pub account_id: String,
-    pub models: Vec<String>,
+    pub models: Vec<InferenceModel>,
     pub checked_at: Option<i64>,
     pub error: Option<String>,
 }
@@ -24,6 +25,7 @@ pub struct AvailablePool {
     pub pool: ModelPool,
     pub automatic: bool,
     pub available: bool,
+    pub limits: ModelLimits,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -129,9 +131,19 @@ impl ModelCatalog {
             };
             match result {
                 Ok(mut models) => {
-                    models.retain(|name| super::config::valid_model(name));
-                    models.sort();
-                    models.dedup();
+                    models.retain(|model| super::config::valid_model(&model.id));
+                    for model in &mut models {
+                        model.limits = model.limits.bounded();
+                    }
+                    models.sort_by(|a, b| a.id.cmp(&b.id));
+                    // Duplicate IDs must not let a larger advertised bound win.
+                    models.dedup_by(|a, b| {
+                        if a.id != b.id {
+                            return false;
+                        }
+                        b.limits = ModelLimits::intersection(&[a.limits, b.limits]);
+                        true
+                    });
                     models.truncate(4096);
                     report.models = models;
                     report.checked_at = Some(ctx.now);
@@ -192,17 +204,20 @@ pub fn library(
     let mut pools = BTreeMap::<String, AvailablePool>::new();
     for catalog in &catalogs {
         for model in &catalog.models {
-            let pool = pools.entry(model.clone()).or_insert_with(|| AvailablePool {
-                pool: ModelPool {
-                    name: model.clone(),
-                    members: vec![],
-                },
-                automatic: true,
-                available: true,
-            });
+            let pool = pools
+                .entry(model.id.clone())
+                .or_insert_with(|| AvailablePool {
+                    pool: ModelPool {
+                        name: model.id.clone(),
+                        members: vec![],
+                    },
+                    automatic: true,
+                    available: true,
+                    limits: ModelLimits::default(),
+                });
             pool.pool.members.push(PoolMember {
                 account_id: catalog.account_id.clone(),
-                model: model.clone(),
+                model: model.id.clone(),
             });
         }
     }
@@ -218,8 +233,34 @@ pub fn library(
                 pool: pool.clone(),
                 automatic: false,
                 available,
+                limits: ModelLimits::default(),
             },
         );
+    }
+    for pool in pools.values_mut() {
+        let limits = pool
+            .pool
+            .members
+            .iter()
+            .filter(|member| {
+                accounts.iter().any(|account| {
+                    account.id == member.account_id && account_issue(account).is_none()
+                })
+            })
+            .map(|member| {
+                catalogs
+                    .iter()
+                    .find(|catalog| {
+                        catalog.account_id == member.account_id && catalog.error.is_none()
+                    })
+                    .and_then(|catalog| {
+                        catalog.models.iter().find(|model| model.id == member.model)
+                    })
+                    .map(|model| model.limits)
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<_>>();
+        pool.limits = ModelLimits::intersection(&limits);
     }
     ModelLibrary {
         catalogs,
@@ -253,7 +294,7 @@ mod tests {
         fn validate(&self, _: &ProviderConfig) -> Result<(), String> {
             Ok(())
         }
-        async fn models(&self, _: &InferenceContext<'_>) -> Result<Vec<String>, String> {
+        async fn models(&self, _: &InferenceContext<'_>) -> Result<Vec<InferenceModel>, String> {
             self.reads.fetch_add(1, Ordering::SeqCst);
             if self.failed.load(Ordering::SeqCst) {
                 Err("Fixture catalog offline".into())
@@ -318,7 +359,14 @@ mod tests {
             )
         };
         let reports = read(&accounts, 1000).await.unwrap();
-        assert_eq!(reports[0].models, ["glm-flash", "qwen"]);
+        assert_eq!(
+            reports[0]
+                .models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            ["glm-flash", "qwen"]
+        );
         assert_eq!(library(&accounts, reports, &[]).pools.len(), 2);
         read(&accounts, 1001).await.unwrap();
         assert_eq!(adapter.reads.load(Ordering::SeqCst), 1);
@@ -366,5 +414,67 @@ mod tests {
         assert_eq!(result.pools.len(), 1);
         assert!(!result.pools[0].automatic);
         assert_eq!(result.pools[0].pool, custom);
+    }
+    #[test]
+    fn chain_limits_include_smaller_missing_and_stale_members_but_exclude_disabled_accounts() {
+        let mut accounts = ["first", "second"]
+            .into_iter()
+            .map(|id| RouteAccount {
+                id: id.into(),
+                config: ProviderConfig {
+                    enabled: true,
+                    ..Default::default()
+                },
+                provider: Arc::new(Adapter {
+                    failed: AtomicBool::new(false),
+                    reads: AtomicUsize::new(0),
+                }),
+                serial: Arc::new(Mutex::new(())),
+            })
+            .collect::<Vec<_>>();
+        let mut reports = accounts
+            .iter()
+            .zip([1_000_000, 32768])
+            .map(|(account, context)| CatalogReport {
+                account_id: account.id.clone(),
+                checked_at: Some(1000),
+                error: None,
+                models: vec![InferenceModel {
+                    id: "model".into(),
+                    limits: ModelLimits {
+                        context: Some(context),
+                        output: Some(8192),
+                        input: None,
+                    },
+                }],
+            })
+            .collect::<Vec<_>>();
+        let pool = ModelPool {
+            name: "arbitrary-chain".into(),
+            members: accounts
+                .iter()
+                .map(|account| PoolMember {
+                    account_id: account.id.clone(),
+                    model: "model".into(),
+                })
+                .collect(),
+        };
+        let limit = |accounts: &[RouteAccount], reports: &[CatalogReport]| {
+            library(accounts, reports.to_vec(), std::slice::from_ref(&pool))
+                .pools
+                .into_iter()
+                .find(|p| p.pool.name == pool.name)
+                .unwrap()
+                .limits
+                .context
+        };
+        assert_eq!(limit(&accounts, &reports), Some(32768));
+        reports[1].error = Some("Catalog unavailable".into());
+        assert_eq!(limit(&accounts, &reports), None);
+        reports[1].error = None;
+        reports[1].models.clear();
+        assert_eq!(limit(&accounts, &reports), None);
+        accounts[1].config.routing.enabled = false;
+        assert_eq!(limit(&accounts, &reports), Some(1_000_000));
     }
 }

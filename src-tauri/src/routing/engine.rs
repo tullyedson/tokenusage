@@ -1,6 +1,7 @@
 use super::{
     catalog::{self, CatalogContext, ModelCatalog, ModelLibrary},
     config::RouterSettings,
+    metadata::InferenceModel,
     reports::{RequestStatus, RequestTrace, RouteTarget, RoutingReport, RoutingReports},
 };
 use crate::{credentials::ISecretStore, model::ProviderConfig};
@@ -58,7 +59,7 @@ pub enum RouteFailure {
 pub trait IInferenceProvider: Send + Sync {
     fn definition(&self) -> InferenceDefinition;
     fn validate(&self, config: &ProviderConfig) -> Result<(), String>;
-    async fn models(&self, context: &InferenceContext<'_>) -> Result<Vec<String>, String>;
+    async fn models(&self, context: &InferenceContext<'_>) -> Result<Vec<InferenceModel>, String>;
     async fn prepare(
         &self,
         context: &InferenceContext<'_>,
@@ -166,7 +167,7 @@ impl RouterEngine {
     pub async fn model_list(&self) -> Result<Value, String> {
         let library = self.model_library(false).await?;
         Ok(
-            json!({"object":"list","data":library.pools.into_iter().filter(|p| p.available && !p.pool.members.is_empty()).map(|p| json!({"id":p.pool.name,"object":"model","created":0,"owned_by":"ai-usage"})).collect::<Vec<_>>()}),
+            json!({"object":"list","data":library.pools.into_iter().filter(|p| p.available && !p.pool.members.is_empty()).map(|p| json!({"id":p.pool.name,"object":"model","created":0,"owned_by":"ai-usage","context_length":p.limits.context,"max_output_tokens":p.limits.output,"limit":p.limits})).collect::<Vec<_>>()}),
         )
     }
     pub async fn cancel_requests(&self) {

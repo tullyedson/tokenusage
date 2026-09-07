@@ -24,7 +24,7 @@ it("adds an account with models included by default and saves connection setting
       const id = String(args?.providerId); const old = data.settings.providers[id]; if (!old) throw new Error("Unknown fixture account");
       data.settings.providers[id] = { ...old, label: String(args?.label), enabled: Boolean(args?.enabled), fields: args?.fields as Record<string, string>, routing: args?.routing as AccountRouting }; return;
     }
-    if (command === "model_library") return { catalogs: [{ accountId: "account-second", models: ["server-x"], checkedAt: 1000, error: null }], pools: [] };
+    if (command === "model_library") return { catalogs: [{ accountId: "account-second", models: ["server-x"].map(id => ({ id, limits: { context: 1000000, input: null, output: 131072 } })), checkedAt: 1000, error: null }], pools: [] };
     if (command === "save_model_pools") { data.settings.routing.pools = args?.pools as ModelPool[]; return; }
     if (command === "routing_report") return { active: [], recent: [], historyLimit: 100, attemptLimit: 64 };
     if (command === "save_routing") { data.settings.routing = { ...args?.routing as RouterSettings, pools: data.settings.routing.pools }; data.router.running = data.settings.routing.enabled; return; }

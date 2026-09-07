@@ -1,5 +1,6 @@
 //! Native inference adapters. No provider credentials or prompts are logged.
 use super::engine::*;
+use super::metadata::{enrich_ollama, InferenceModel, ModelLimits};
 use crate::model::ProviderConfig;
 use async_trait::async_trait;
 use reqwest::Url;
@@ -98,6 +99,40 @@ impl HttpProvider {
         }
         read_json(&mut response, 4 * 1024 * 1024).await
     }
+    async fn listed_models(
+        &self,
+        ctx: &InferenceContext<'_>,
+    ) -> Result<Vec<InferenceModel>, String> {
+        self.validate(ctx.config)?;
+        let catalog = self.catalog(ctx).await?;
+        let (key, name) = if matches!(self, Self::OllamaLocal) {
+            ("models", "name")
+        } else {
+            ("data", "id")
+        };
+        let rows = catalog[key]
+            .as_array()
+            .ok_or("The server returned an unsupported model catalog.")?;
+        let models = rows
+            .iter()
+            .filter(|row| match self {
+                Self::OllamaLocal => is_local_ollama(row),
+                Self::OpenRouterFree => is_free_model(row),
+                Self::VllmLocal => true,
+            })
+            .filter_map(|row| {
+                row[name]
+                    .as_str()
+                    .filter(|id| super::config::valid_model(id))
+                    .map(|id| InferenceModel {
+                        id: id.into(),
+                        limits: ModelLimits::from_catalog(row),
+                    })
+            })
+            .take(4096)
+            .collect::<Vec<_>>();
+        Ok(models)
+    }
 }
 
 pub fn is_local_ollama(row: &Value) -> bool {
@@ -145,32 +180,20 @@ impl IInferenceProvider for HttpProvider {
         }
         Ok(())
     }
-    async fn models(&self, ctx: &InferenceContext<'_>) -> Result<Vec<String>, String> {
-        self.validate(ctx.config)?;
-        let catalog = self.catalog(ctx).await?;
-        let (key, name) = if matches!(self, Self::OllamaLocal) {
-            ("models", "name")
-        } else {
-            ("data", "id")
-        };
-        let rows = catalog[key]
-            .as_array()
-            .ok_or("The server returned an unsupported model catalog.")?;
-        Ok(rows
-            .iter()
-            .filter(|row| match self {
-                Self::OllamaLocal => is_local_ollama(row),
-                Self::OpenRouterFree => is_free_model(row),
-                Self::VllmLocal => true,
-            })
-            .filter_map(|row| {
-                row[name]
-                    .as_str()
-                    .filter(|id| super::config::valid_model(id))
-                    .map(str::to_string)
-            })
-            .take(4096)
-            .collect())
+    async fn models(&self, ctx: &InferenceContext<'_>) -> Result<Vec<InferenceModel>, String> {
+        let mut models = self.listed_models(ctx).await?;
+        if matches!(self, Self::OllamaLocal) {
+            let key = self.key(ctx)?;
+            enrich_ollama(
+                ctx.client,
+                &self.base(ctx.config)?,
+                key.as_deref().map(|key| key.as_str()),
+                &mut models,
+                true,
+            )
+            .await;
+        }
+        Ok(models)
     }
     async fn prepare(
         &self,
@@ -181,14 +204,14 @@ impl IInferenceProvider for HttpProvider {
         self.validate(ctx.config)
             .map_err(|_| RouteFailure::Invalid("The account routing settings are invalid."))?;
         let models = self
-            .models(ctx)
+            .listed_models(ctx)
             .await
             .map_err(|_| RouteFailure::Unavailable {
                 reason: "Model availability could not be verified.",
                 retry_at: chrono::Utc::now().timestamp() + 15,
                 account_wide: true,
             })?;
-        if !models.iter().any(|id| id == upstream) {
+        if !models.iter().any(|model| model.id == upstream) {
             return Err(RouteFailure::Unavailable {
                 reason: "Model is unavailable or does not meet the local/free-only policy.",
                 retry_at: chrono::Utc::now().timestamp() + 30,

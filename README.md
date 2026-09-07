@@ -2,7 +2,7 @@
 
 A Rust and Tauri 2 app for Windows that shows AI account usage in the system tray and provides an optional local model router.
 
-**Version 0.6.0** adds a live **Reports** tab showing the model pool, provider, account and actual model used by each request, with recent history and fallback reasons. Create common names such as `flash-models` on Models, drag in models from different providers or local servers, and order them. Calling apps use that one name while the router follows its fallback list. Plan-only routing is the default for supported accounts.
+**Version 0.6.1** passes provider context/input/output limits through the router and into OpenCode. Each model pool advertises the lowest supported limits across its enabled entries. The Models page shows these limits; Reports shows active destinations and recent fallback history. Create common names such as `flash-models` on Models, drag in models from different providers or local servers, and order them. Calling apps use that one name while the router follows its fallback list. Plan-only routing is the default for supported accounts.
 
 | Page | What you can do |
 | --- | --- |
@@ -22,7 +22,7 @@ This README describes the checked-out source version. `main` changes only after 
 
 Use Windows x64 and Microsoft Edge WebView2. You do not need Rust or Node.js to run an installer supplied by the maintainer; those are only needed to build the app.
 
-1. Run the **AI Usage 0.6.0 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
+1. Run the **AI Usage 0.6.1 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
 2. Launch **AI Usage** from the Start menu. If you cannot see its tray icon, open Windows' hidden-icons area.
 3. Click or double-click the tray icon to open **Usage**. Right-click it for **Show usage**, **Settings**, or **Exit**.
 4. Use the **Usage**, **Models**, **Reports**, **Routing** and **Settings** tabs in the app window. Closing this window hides it; **Exit** stops the app and its router.
@@ -140,6 +140,26 @@ Use the exact IDs shown in your own catalog. The examples do not install models 
 
 Draft changes survive page navigation and catalog refresh. They take effect only after **Save pools**. A failed save leaves the draft intact.
 
+### Context and output limits
+
+The Models page shows each discovered model's context and output limits, plus the current chain limit while you edit a pool. The router publishes `limit.context`, `limit.input` and `limit.output` in `/v1/models`, with `context_length` and `max_output_tokens` aliases for compatible clients. Values are token counts; `null` means unknown. Other clients must consume these extension fields or configure their own matching limits.
+
+A chain uses the **lowest limit across all enabled, routing-eligible entries**, independent of order or remaining quota. For GLM-5.3-Flash on Go (1,000,000 context) and Ollama Cloud (1,048,576 context), the chain advertises **1,000,000**. Adding a 32,768-context local model lowers that chain to 32,768. Temporary depletion does not increase the chain limit. A missing model, failed catalog or unknown member bound makes that bound unknown; it is never ignored as unlimited. Disabled/excluded accounts do not participate until re-enabled. Save pool changes and restart OpenCode to refresh its limits.
+
+| Source | Where limits come from |
+| --- | --- |
+| OpenCode Go | Exact provider/model metadata in OpenCode's public [Models.dev catalog](https://models.dev), supplementing its ID-only Go endpoint. |
+| Ollama Cloud | `/api/show` context metadata, supplemented by exact `ollama-cloud` Models.dev input/output fields. |
+| vLLM | The running server's `/v1/models`, including configured `max_model_len`. This can be smaller than the model's trained maximum. |
+| Ollama (local) | `/api/show` model `num_ctx` parameter, bounded by the trained maximum. An unreported server default stays unknown. |
+| OpenRouter free models | The eligible model's context and top-provider completion/context limits. |
+
+The supplemental public catalog is read without credentials, cached for five minutes and bounded to 16 MiB. Failed refreshes do not reuse expired limits; names can still be discovered. Metadata reads never generate text, and names absent from an account's own eligible catalog are never added by the supplement.
+
+For local Ollama, configure the context you intend to run in that model's Modelfile with `PARAMETER num_ctx`, then refresh models. The router does not increase GPU memory allocation or assume a theoretical 1M model runs with 1M context locally. See [Ollama context length](https://docs.ollama.com/context-length) and [Modelfile parameters](https://docs.ollama.com/modelfile#parameter).
+
+The proxy accepts JSON requests up to **16 MiB**, including tools and message history. This replaces the old 1 MiB cap so normal long-context requests can reach the provider. Token limits and this byte limit are separate. The provider performs token counting and enforces its actual capacity; the proxy does not truncate prompts or estimate tokens from character counts.
+
 ### 3. How fallback works
 
 For a `flash-models` request, the router tries that pool's entries from top to bottom. Each entry identifies one account and one upstream model. Disabled accounts, depleted allowances, unavailable models, and active cooldowns are skipped. A later exact-name match does not jump ahead of an earlier different model. Two models from the same account may appear in the same pool; duplicate account/model pairs are rejected.
@@ -176,12 +196,14 @@ A streaming connection can return HTTP 200 and later fail. Reports mark success 
 
 ### OpenCode
 
-1. Merge [examples/opencode/opencode.json](examples/opencode/opencode.json) into your project's `opencode.json`, preserving existing providers. Its optional explicit GLM limits are client settings, not a claim about upstream capacity.
+1. Merge [examples/opencode/opencode.json](examples/opencode/opencode.json) into your project's `opencode.json`, preserving existing providers. The example leaves model limits to the discovery plugin.
 2. In OpenCode, use `/connect`, choose **Other**, enter provider ID **ai-usage**, and save the **AI Usage client key**. Keep provider keys and the router client key out of project JSON and Git.
-3. Copy [ai-usage-session.js](examples/opencode/ai-usage-session.js) into the project's `.opencode/plugins/` directory. It imports all model and pool names from the local router when OpenCode starts. It reads the `ai-usage` key from OpenCode's auth store (or an already configured API key), sends it only to the IPv4 loopback router, and forwards an opaque conversation ID. It never reads project source or prompts, and does not log keys.
+3. Copy [ai-usage-session.js](examples/opencode/ai-usage-session.js) into the project's `.opencode/plugins/` directory. It imports all model and pool names and their chain limits from the local router when OpenCode starts. It reads the `ai-usage` key from OpenCode's auth store (or an already configured API key), sends it only to the IPv4 loopback router, and forwards an opaque conversation ID. It never reads project source or prompts, and does not log keys.
 4. Restart OpenCode in that project after saving or renaming pools. Use `/models` to select **AI Usage local router**, then the desired model or `flash-models`. You can also use `opencode --model ai-usage/flash-models` after creating that pool.
 
-No individual JSON entry is needed for newly discovered model names. Imported models use conservative **client defaults** of 16,384 context and 4,096 output tokens. Override a name under `provider.ai-usage.models` when needed, using limits and capabilities supported by **every** entry in its pool. Tool support is assumed for the OpenCode integration; use chat/tool-capable models. Existing explicit model settings are preserved. If the router is offline, the plugin preserves manually configured models. Tested with OpenCode 1.18.29.
+No individual JSON entry is needed for newly discovered model names. **The plugin synchronizes limits even for existing entries**, replacing old context/output guesses such as the earlier 131,072-context GLM example. Labels, options and other explicit model settings are preserved. An unknown chain limit uses an unverified **client budget** of 16,384 context or 4,096 output tokens, not an upstream capability claim. Unknown input limits are removed, and output/input budgets never exceed context. If the router is offline or an older router returns names only, existing explicit limits remain. Tool support is assumed for this integration; choose chat/tool-capable entries. Tested with OpenCode 1.18.29.
+
+To update an existing connection, replace the project plugin with the current example and restart OpenCode. Merely changing the router does not refresh an already running OpenCode session. The plugin does not rewrite project JSON or the auth file.
 
 `opencode models ai-usage` lists imported OpenCode choices. Authenticated `GET /v1/models` lists router model and pool names. Neither list proves an inference request succeeded or that a model supports every request option.
 
@@ -281,7 +303,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 
 The build script prepares a local test-temp directory, runs frontend tests, Rust tests and Clippy, then builds the production frontend and NSIS installer. The default outputs for this version are:
 
-- `src-tauri/target/release/bundle/nsis/AI Usage_0.6.0_x64-setup.exe`, the installer to distribute.
+- `src-tauri/target/release/bundle/nsis/AI Usage_0.6.1_x64-setup.exe`, the installer to distribute.
 - `src-tauri/target/release/ai-usage-tray.exe`, the app executable you can run directly.
 
 If `CARGO_TARGET_DIR` is set, the native outputs are under that directory instead. Build outputs, dependencies and account data are ignored by Git. Building the installer does not run it.

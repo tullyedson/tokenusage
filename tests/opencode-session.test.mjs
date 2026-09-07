@@ -25,6 +25,36 @@ describe("OpenCode router session integration", () => {
     await hooks.config({ provider: { unrelated: {} } });
     expect(fetcher).not.toHaveBeenCalled();
   });
+  it("replaces the old 128k GLM guess and imports chain metadata for arbitrary aliases", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [
+      { id: "glm-5.3-flash", limit: { context: 1000000, output: 131072, input: null } },
+      { id: "mixed-chain", limit: { context: 32768, output: 8192, input: 30000 } },
+    ] })));
+    vi.stubGlobal("fetch", fetcher);
+    const model = { name: "Custom label", tool_call: false, options: { temperature: 0.3 }, limit: { context: 131072, output: 16384, input: 120000 } };
+    const config = { provider: { "ai-usage": { options: { apiKey: "fictional_client_key_for_tests_0000000" }, models: { "glm-5.3-flash": model } } } };
+    await (await AiUsageSession()).config(config);
+    expect(model.limit).toEqual({ context: 1000000, output: 131072 });
+    expect(model.name).toBe("Custom label"); expect(model.tool_call).toBe(false);
+    expect(model.options).toEqual({ temperature: 0.3 });
+    expect(config.provider["ai-usage"].models["mixed-chain"].limit).toEqual({ context: 32768, output: 8192, input: 30000 });
+  });
+  it("does not keep oversized limits when a chain shrinks or its metadata becomes unknown", async () => {
+    const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+    const config = { provider: { "ai-usage": { options: { apiKey: "fictional_client_key_for_tests_0000000" }, models: {} } } };
+    const hooks = await AiUsageSession();
+    for (const [limit, expected] of [
+      [{ context: 1000000, output: 131072 }, { context: 1000000, output: 131072 }],
+      [{ context: 32768, output: 8192 }, { context: 32768, output: 8192 }],
+      [{ context: null, output: null }, { context: 16384, output: 4096 }],
+      [{ context: -1, output: "131072", input: 2.5 }, { context: 16384, output: 4096 }],
+      [{ context: 2048, output: 8192 }, { context: 2048, output: 2048 }],
+    ]) {
+      fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "chain", limit }] })));
+      await hooks.config(config);
+      expect(config.provider["ai-usage"].models.chain.limit).toEqual(expected);
+    }
+  });
   it("keeps an opaque conversation ID stable across messages and leaves other providers alone", async () => {
     const hooks = await AiUsageSession();
     const headers = { "existing-header": "preserved" };

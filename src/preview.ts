@@ -61,7 +61,7 @@ export class PreviewApi implements IUsageAppApi {
   async saveRouting(routing: RouterSettings, clientToken: string): Promise<void> { if (clientToken) throw new Error("Client keys are only saved in the desktop app."); this.data.settings.routing = { ...routing, pools: this.data.settings.routing.pools }; }
   async modelLibrary(): Promise<ModelLibrary> {
     const examples: Record<string, string[]> = { opencode: ["glm-5.3-flash", "minimax-m2.7"], ollama: ["glm-5.3-flash", "deepseek-flash", "qwen3-coder"], openrouter: ["example/model:free"] };
-    return { catalogs: Object.entries(this.data.settings.providers).filter(([id, config]) => examples[id] && config.enabled && config.routing.enabled).map(([accountId]) => ({ accountId, models: examples[accountId] ?? [], checkedAt: Date.now()/1000, error: null })), pools: this.data.settings.routing.pools.map(pool => ({ ...pool, automatic: false, available: true })) };
+    return { catalogs: Object.entries(this.data.settings.providers).filter(([id, config]) => examples[id] && config.enabled && config.routing.enabled).map(([accountId]) => ({ accountId, models: (examples[accountId] ?? []).map(id => ({ id, limits: { context: 1000000, input: null, output: 131072 } })), checkedAt: Date.now()/1000, error: null })), pools: this.data.settings.routing.pools.map(pool => ({ ...pool, automatic: false, available: true, limits: { context: 1000000, input: null, output: 131072 } })) };
   }
   async saveModelPools(pools: ModelPool[]): Promise<void> { this.data.settings.routing.pools = structuredClone(pools); this.changed?.(); }
   async routingReport(): Promise<RoutingReport> { return structuredClone(this.activity); }

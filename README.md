@@ -2,7 +2,7 @@
 
 A Rust and Tauri 2 app for Windows that shows AI account usage in the system tray and provides an optional local model router.
 
-**Version 0.3.1** supports multiple accounts per provider, remaining-usage bars, provider-reported reset times, account priority, model aliases, explicit fallback mappings, and streaming chat completions. It includes the Ollama Cloud fix for reset times placed below a separate usage header.
+**Version 0.3.2** supports multiple accounts per provider, remaining-usage bars, provider-reported reset times, account priority, model aliases, explicit fallback mappings, and streaming chat completions. It omits the separate Codex-Spark usage meters and includes the Ollama Cloud reset-time fix.
 
 | Page | What you can do |
 | --- | --- |
@@ -14,13 +14,13 @@ A Rust and Tauri 2 app for Windows that shows AI account usage in the system tra
 
 [Install](#install-and-open) · [Connect accounts](#connect-accounts-and-see-usage) · [Set up routing](#set-up-routing) · [Calling-app example](#connect-a-calling-app) · [Troubleshooting](#troubleshooting) · [Build from source](#build-from-source)
 
-The routing implementation and this README are on [`feature/model-routing`](https://github.com/tullyedson/tokenusage/tree/feature/model-routing), in [PR #1](https://github.com/tullyedson/tokenusage/pull/1) for owner review. `main` changes only after an owner-approved merge. The source-build command below selects the branch containing these features.
+This README describes the checked-out source version. `main` changes only after an owner-approved merge. To build a change still under review, check out that pull request's branch before running the build commands.
 
 ## Install and open
 
 Use Windows x64 and Microsoft Edge WebView2. You do not need Rust or Node.js to run an installer supplied by the maintainer; those are only needed to build the app.
 
-1. Run the **AI Usage 0.3.1 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
+1. Run the **AI Usage 0.3.2 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
 2. Launch **AI Usage** from the Start menu. If you cannot see its tray icon, open Windows' hidden-icons area.
 3. Click or double-click the tray icon to open **Usage**. Right-click it for **Show usage**, **Settings**, or **Exit**.
 4. Use the **Usage**, **Settings** and **Routing** tabs in the app window. Closing this window hides it; **Exit** stops the app and its router.
@@ -51,7 +51,7 @@ Use **Add another account** inside a provider for another connection. Each accou
 | Ollama (local) | LLM | A running server's **Server URL**, usually `http://127.0.0.1:11434`. **Server API key** is optional. | Server connectivity and eligible local model count. There is no subscription quota. |
 | vLLM (local) | LLM | A running server's **Server URL**, usually `http://127.0.0.1:8000`, and **Server API key** if authentication is enabled. | Server connectivity and model count. There is no subscription quota. |
 
-OpenAI's source reports **Codex usage**. It does not expose all ChatGPT chat-model caps. Consumer subscription allowances are separate from API billing. No model generation, paid API calls or usage-reset purchases are part of these readers.
+OpenAI's source reports **Codex usage**. The separate **GPT-5.3-Codex-Spark** five-hour and weekly meters are omitted; the regular Codex allowances retain their reported percentages and reset times. It does not expose all ChatGPT chat-model caps. Consumer subscription allowances are separate from API billing. No model generation, paid API calls or usage-reset purchases are part of these readers.
 
 For **OpenRouter**, choose **Account credits (management key)** to see the account balance. Obtain a management key in your OpenRouter account settings. The percentage compares the remaining balance with the provider's total purchased credits, not a recurring monthly budget. **This key's allowance (standard key)** uses the key's own configured daily, weekly, monthly or lifetime spending cap. An uncapped key has no remaining allowance to calculate; this does not mean its account has unlimited credits. Management-key connections make only read-only usage requests.
 
@@ -221,7 +221,7 @@ Use Windows x64, Git, a current stable Rust MSVC toolchain, Node.js 22.12 or lat
 In PowerShell, from the directory where you want the source:
 
 ```powershell
-git clone --branch feature/model-routing https://github.com/tullyedson/tokenusage.git
+git clone https://github.com/tullyedson/tokenusage.git
 cd tokenusage
 npm.cmd ci
 powershell -ExecutionPolicy Bypass -File scripts/build.ps1
@@ -229,7 +229,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 
 The build script prepares a local test-temp directory, runs frontend tests, Rust tests and Clippy, then builds the production frontend and NSIS installer. The default outputs for this version are:
 
-- `src-tauri/target/release/bundle/nsis/AI Usage_0.3.1_x64-setup.exe`, the installer to distribute.
+- `src-tauri/target/release/bundle/nsis/AI Usage_0.3.2_x64-setup.exe`, the installer to distribute.
 - `src-tauri/target/release/ai-usage-tray.exe`, the app executable you can run directly.
 
 If `CARGO_TARGET_DIR` is set, the native outputs are under that directory instead. Build outputs, dependencies and account data are ignored by Git. Building the installer does not run it.
@@ -252,7 +252,7 @@ An optional integration test reads the existing Codex account's usage. It is ign
 cargo test --manifest-path src-tauri/Cargo.toml signed_in_codex_returns_usage -- --ignored
 ```
 
-Version 0.3.1 has 34 passing Rust tests and 20 passing frontend tests. The installer and packaged source were checked for integrity and account-data exclusion. Most provider and routing checks use fictional HTTP/HTML fixtures. Installer interaction, live Ollama sign-in/reset display and live model requests remain hands-on checks; see [Verification](docs/VERIFICATION.md) for the exact scope.
+Version 0.3.2 has 36 passing Rust tests and 20 passing frontend tests. The signed-in Codex usage check also passes. The NSIS package and a silent current-user upgrade were verified, including preserved settings, startup preferences and the existing local router connection. Most provider checks use fictional HTTP/HTML fixtures; interactive installer and website sign-in checks remain separate. See [Verification](docs/VERIFICATION.md) for the exact scope.
 
 ## Add providers and contribute
 

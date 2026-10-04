@@ -4,7 +4,7 @@ use crate::model::{number, timestamp, SettingField, UsageMeter};
 pub struct Suno;
 impl IUsageProvider for Suno {
     fn definition(&self) -> ProviderDefinition {
-        ProviderDefinition { id: "suno", name: "Suno", category: "music", initials: "Su", color: "#edb276", description: "Read subscription and total credits from your signed-in Suno account.", help_url: "https://suno.com/account", fields: vec![SettingField::number("allowance", "Total-credit reference allowance", "Optional. Used only for the total-credit bar when Suno does not supply its denominator. Include top-ups if that is the balance you want to compare.")] }
+        ProviderDefinition { id: "suno", name: "Suno", category: "music", initials: "Su", color: "#edb276", description: "Read subscription and total credits from your signed-in Suno account.", show_in_usage: true, help_url: "https://suno.com/account", fields: vec![SettingField::number("allowance", "Total-credit reference allowance", "Optional. Used only for the total-credit bar when Suno does not supply its denominator. Include top-ups if that is the balance you want to compare.")] }
     }
     fn browser_spec(&self) -> Option<BrowserSpec> {
         Some(BrowserSpec {

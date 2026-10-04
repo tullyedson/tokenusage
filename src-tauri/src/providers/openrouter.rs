@@ -25,7 +25,7 @@ impl IUsageProvider for OpenRouter {
                 label: "This key's allowance (standard key)",
             },
         ];
-        ProviderDefinition { id: "openrouter", name: "OpenRouter", category: "llm", initials: "OR", color: "#afa8f4", description: "Account credit balance or a single API key's remaining spending allowance.", help_url: "https://openrouter.ai/settings/keys", fields: vec![connection, SettingField::secret("api_key", "OpenRouter key", "Saved in Windows Credential Manager. Leave blank to keep the saved key. Usage checks never generate tokens.")] }
+        ProviderDefinition { id: "openrouter", name: "OpenRouter", category: "llm", initials: "OR", color: "#afa8f4", description: "Account credit balance or a single API key's remaining spending allowance.", show_in_usage: true, help_url: "https://openrouter.ai/settings/keys", fields: vec![connection, SettingField::secret("api_key", "OpenRouter key", "Saved in Windows Credential Manager. Leave blank to keep the saved key. Usage checks never generate tokens.")] }
     }
     async fn connect(
         &self,

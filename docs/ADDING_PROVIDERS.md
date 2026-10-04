@@ -11,6 +11,8 @@ The extension boundary is `IUsageProvider` in `src-tauri/src/providers/mod.rs`. 
 
 That is enough to make the provider appear in both Settings and Usage. Choose an existing category: `llm`, `music`, `speech` or `media`. IDs must be unique, stable lowercase letters, digits or hyphens because they are also used as session-profile identifiers.
 
+Set `ProviderDefinition.show_in_usage` to `true` for providers with allowances or credits. Set it to `false` for routing-only local servers. Usage uses this metadata for its account cards, counts and setup shortcuts; Settings and Models still include local connections. Unconfigured usage providers appear as setup buttons that open the provider's account form directly. Keep this policy in provider metadata rather than adding provider-ID checks to the frontend.
+
 The ID `router` is reserved for local client authentication. Do not use it as a provider ID.
 
 ## Contract

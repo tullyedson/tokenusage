@@ -8,7 +8,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 
 it("adds an account with models included by default and saves connection settings without overwriting pools", async () => {
   const data: Bootstrap = {
-    providers: [{ id: "vllm-local", name: "vLLM (local)", category: "llm", initials: "vL", color: "#82bbec", description: "Local model server", helpUrl: "https://example.com", fields: [{ key: "base_url", label: "Server URL", kind: "text", help: "", placeholder: "", options: [] }] }],
+    providers: [{ id: "vllm-local", name: "vLLM (local)", category: "llm", initials: "vL", color: "#82bbec", description: "Local model server", showInUsage: false, helpUrl: "https://example.com", fields: [{ key: "base_url", label: "Server URL", kind: "text", help: "", placeholder: "", options: [] }] }],
     settings: { version: 3, refreshMinutes: 5, providers: { "vllm-local": { enabled: true, providerType: "", label: "Server one", fields: { base_url: "http://127.0.0.1:8000" }, routing: { enabled: true }, revision: 0, sessionGeneration: 0 } }, routing: { enabled: false, port: 43129, pools: [] } },
     reports: [], configuredSecrets: {}, startupError: null, inference: { "vllm-local": { description: "Local inference" } }, router: { running: false, baseUrl: "http://127.0.0.1:43129/v1", tokenConfigured: true, error: null },
   };

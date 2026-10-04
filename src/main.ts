@@ -38,7 +38,7 @@ function accountsFor(provider: ProviderDefinition): AccountView[] {
   if (!ids.length) ids.push(provider.id);
   return ids.map(id => ({ ...provider, id, providerType: provider.id, name: data.settings.providers[id]?.label ? `${provider.name} · ${data.settings.providers[id]?.label}` : provider.name }));
 }
-function configuredProviders(): AccountView[] { return data.providers.flatMap(accountsFor).filter(provider => data.settings.providers[provider.id]?.enabled); }
+function configuredProviders(): AccountView[] { return data.providers.filter(provider => provider.showInUsage).flatMap(accountsFor).filter(provider => data.settings.providers[provider.id]?.enabled); }
 function reportFor(id: string): ProviderReport | undefined { return data.reports.find(report => report.providerId === id); }
 function notify(message: string, error = false): void {
   const toast = appRoot.querySelector<HTMLDivElement>("#toast");
@@ -105,9 +105,12 @@ function providerCard(provider: ProviderDefinition): string {
 }
 function usagePage(): string {
   const providers = configuredProviders();
+  const available = data.providers.filter(provider => provider.showInUsage && !accountsFor(provider).some(account => data.settings.providers[account.id]?.enabled));
+  const setup = available.length ? `<section class="usage-setup" aria-label="Connect usage providers"><h2>Connect a provider</h2><div class="usage-setup-links">${available.map(provider => `<button type="button" class="secondary" data-configure="${esc(accountsFor(provider)[0]!.id)}">${icon(provider)}${esc(provider.name)}<span aria-hidden="true">↗</span></button>`).join("")}</div></section>` : "";
   return `<section class="page-heading"><div><span class="eyebrow">YOUR ALLOWANCES</span><h1>Usage</h1><p>A little clarity before your next idea.</p></div><button class="secondary refresh-all" ${busy ? "disabled" : ""}>${busy ? '<span class="spinner"></span> Refreshing' : "↻ Refresh all"}</button></section>
     ${data.startupError ? `<div class="inline-error">${esc(data.startupError)}</div>` : ""}
-    ${providers.length ? `<div class="overview-line"><span><span class="live-dot"></span>${providers.length} provider${providers.length === 1 ? "" : "s"} enabled</span><span>Checks every ${data.settings.refreshMinutes} minutes</span></div><div class="usage-grid">${providers.map(providerCard).join("")}</div>` : `<section class="empty-state"><div class="empty-visual">${logo()}<span class="orbit one"></span><span class="orbit two"></span></div><span class="eyebrow">ONE QUIET PLACE FOR YOUR AI</span><h2>Know what you have left.</h2><p>Connect your providers to see their remaining allowances and credits here.</p><button class="primary" id="first-provider">Connect a provider <span>↗</span></button><div class="provider-chips">${data.providers.map(provider => `<span>${esc(provider.name)}</span>`).join("")}</div></section>`}`;
+    ${setup}
+    ${providers.length ? `<div class="overview-line"><span><span class="live-dot"></span>${providers.length} account${providers.length === 1 ? "" : "s"} tracked</span><span>Checks every ${data.settings.refreshMinutes} minutes</span></div><div class="usage-grid">${providers.map(providerCard).join("")}</div>` : `<section class="empty-state"><div class="empty-visual">${logo()}<span class="orbit one"></span><span class="orbit two"></span></div><span class="eyebrow">ONE QUIET PLACE FOR YOUR AI</span><h2>Know what you have left.</h2><p>Connect your providers to see their remaining allowances and credits here.</p><button class="primary" id="first-provider">Open settings <span>↗</span></button></section>`}`;
 }
 function bindUsage(): void {
   appRoot.querySelector("#first-provider")?.addEventListener("click", () => navigate("settings"));

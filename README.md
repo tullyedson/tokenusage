@@ -2,7 +2,7 @@
 
 A Rust and Tauri 2 app for Windows that shows AI account usage in the system tray and provides an optional local model router.
 
-**Version 0.9.0** adds Google AI Ultra usage tracking with separate Gemini app and Antigravity connections. It includes per-call body sizes, provider token counts, context usage and supported account allowance observations in Reports, plus sticky load distribution and ordered failover. Each pool has its own route type. Provider context/input/output limits pass through the router and into OpenCode. Each model pool advertises the lowest supported limits across its enabled entries. The Models page shows these limits; Reports shows active destinations and recent fallback history. Create common names such as `flash-models` on Models, drag in models from different providers or local servers, and choose how to route them. Calling apps use that one name while the router follows the pool's selection policy. Plan-only routing is the default for supported accounts.
+**Version 0.9.1** makes unconfigured providers easy to connect directly from Usage and keeps local model servers in Settings and Models. Google AI Ultra has separate Gemini app and Antigravity usage connections. It includes per-call body sizes, provider token counts, context usage and supported account allowance observations in Reports, plus sticky load distribution and ordered failover. Each pool has its own route type. Provider context/input/output limits pass through the router and into OpenCode. Each model pool advertises the lowest supported limits across its enabled entries. The Models page shows these limits; Reports shows active destinations and recent fallback history. Create common names such as `flash-models` on Models, drag in models from different providers or local servers, and choose how to route them. Calling apps use that one name while the router follows the pool's selection policy. Plan-only routing is the default for supported accounts.
 
 | Page | What you can do |
 | --- | --- |
@@ -22,7 +22,7 @@ This README describes the checked-out source version. `main` changes only after 
 
 Use Windows x64 and Microsoft Edge WebView2. You do not need Rust or Node.js to run an installer supplied by the maintainer; those are only needed to build the app.
 
-1. Run the **AI Usage 0.9.0 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
+1. Run the **AI Usage 0.9.1 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
 2. Launch **AI Usage** from the Start menu. If you cannot see its tray icon, open Windows' hidden-icons area.
 3. Click or double-click the tray icon to open **Usage**. Right-click it for **Show usage**, **Settings**, or **Exit**.
 4. Use the **Usage**, **Models**, **Reports**, **Routing** and **Settings** tabs in the app window. Closing this window hides it; **Exit** stops the app and its router.
@@ -62,7 +62,7 @@ For **OpenRouter**, choose **Account credits (management key)** to see the accou
 
 For **OpenCode**, use an API key from the workspace and member with an active **Go** subscription. The three meters use OpenCode's reported consumption and reset timestamps, without hardcoded dollar limits. **Zen pay-as-you-go wallet credits and usage of other providers through the OpenCode CLI are not included** in this connection. Track other providers with their respective adapters.
 
-For **Google AI Ultra**, connect each supported product separately under **Settings > LLM > Google AI Ultra**. Choose a **Usage source**, label it (for example, `Google - Gemini`), enable it, and click **Connect account**. Use **Add another account** for `Google - Antigravity`. Gemini sign-in uses this app's isolated browser and reads the account's actual Usage page data. Its reader has fixture coverage; a real Google sign-in in WebView2 has not yet been verified. Antigravity requires the signed-in Windows desktop app to be running in its standard installation location. Its connection follows that app's current account, so creating several Antigravity connections does not create independent Google sign-ins. Antigravity has been verified against the signed-in desktop service. The tracker reads quotas only and does not enable overages or routing. Gemini and Antigravity have separate allowances; any reported AI credit balance is also separate from included usage. No limit is inferred from the Ultra plan name. Flow is not tracked.
+For **Google AI Ultra**, click its button under **Connect a provider** on Usage, or open **Settings > LLM > Google AI Ultra**. Connect each supported product separately. Choose a **Usage source**, label it (for example, `Google - Gemini`), enable it, and click **Connect account**. Use **Add another account** for `Google - Antigravity`. Gemini sign-in uses this app's isolated browser and reads the account's actual Usage page data. Its reader has fixture coverage; a real Google sign-in in WebView2 has not yet been verified. Antigravity requires the signed-in Windows desktop app to be running in its standard installation location. Its connection follows that app's current account, so creating several Antigravity connections does not create independent Google sign-ins. Antigravity has been verified against the signed-in desktop service. The tracker reads quotas only and does not enable overages or routing. Gemini and Antigravity have separate allowances; any reported AI credit balance is also separate from included usage. No limit is inferred from the Ultra plan name. Flow is not tracked.
 
 Balances without a reported denominator display **Percent unavailable**. Suno and Higgsfield offer an optional reference allowance for their total-credit bars; it is your comparison value, not a provider-reported limit. Separate subscription bars use the provider's reported allowance. Reset times are displayed only when supplied; reaching a reset time never invents a new balance.
 
@@ -359,7 +359,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 
 The build script prepares a local test-temp directory, runs frontend tests, Rust tests and Clippy, then builds the production frontend and NSIS installer. The default outputs for this version are:
 
-- `src-tauri/target/release/bundle/nsis/AI Usage_0.9.0_x64-setup.exe`, the installer to distribute.
+- `src-tauri/target/release/bundle/nsis/AI Usage_0.9.1_x64-setup.exe`, the installer to distribute.
 - `src-tauri/target/release/ai-usage-tray.exe`, the app executable you can run directly.
 
 If `CARGO_TARGET_DIR` is set, the native outputs are under that directory instead. Build outputs, dependencies and account data are ignored by Git. Building the installer does not run it.

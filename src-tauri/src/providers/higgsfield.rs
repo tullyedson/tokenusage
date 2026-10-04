@@ -4,7 +4,7 @@ use crate::model::{number, timestamp, SettingField, UsageMeter};
 pub struct Higgsfield;
 impl IUsageProvider for Higgsfield {
     fn definition(&self) -> ProviderDefinition {
-        ProviderDefinition { id: "higgsfield", name: "Higgsfield", category: "media", initials: "Hi", color: "#b8a3ef", description: "Read the subscription wallet for the workspace selected in your Higgsfield account.", help_url: "https://higgsfield.ai/me/settings/subscription", fields: vec![SettingField::number("allowance", "Total-credit reference allowance", "Optional denominator for the total-credit bar. Subscription credits use the allowance reported by Higgsfield.")] }
+        ProviderDefinition { id: "higgsfield", name: "Higgsfield", category: "media", initials: "Hi", color: "#b8a3ef", description: "Read the subscription wallet for the workspace selected in your Higgsfield account.", show_in_usage: true, help_url: "https://higgsfield.ai/me/settings/subscription", fields: vec![SettingField::number("allowance", "Total-credit reference allowance", "Optional denominator for the total-credit bar. Subscription credits use the allowance reported by Higgsfield.")] }
     }
     fn browser_spec(&self) -> Option<BrowserSpec> {
         Some(BrowserSpec {

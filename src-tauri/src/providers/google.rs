@@ -30,7 +30,7 @@ impl IUsageProvider for Google {
         ProviderDefinition {
             id: "google", name: "Google AI Ultra", category: "llm", initials: "G", color: "#8ab4f8",
             description: "Google AI subscription allowances, reported separately for each product. Connect the Google account with your Ultra plan. Usage monitoring only.",
-            help_url: "https://support.google.com/googleone/answer/16286513", fields: vec![connection],
+            show_in_usage: true, help_url: "https://support.google.com/googleone/answer/16286513", fields: vec![connection],
         }
     }
     fn browser_spec(&self) -> Option<BrowserSpec> {

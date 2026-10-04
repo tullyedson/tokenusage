@@ -10,6 +10,7 @@ pub struct ProviderDefinition {
     pub initials: &'static str,
     pub color: &'static str,
     pub description: &'static str,
+    pub show_in_usage: bool,
     pub help_url: &'static str,
     pub fields: Vec<SettingField>,
 }

@@ -1,7 +1,7 @@
 export type Page = "usage" | "settings" | "routing" | "models" | "reports";
 export type Category = "llm" | "music" | "speech" | "media";
 export type SettingField = { key: string; label: string; kind: string; help: string; placeholder: string; options: { value: string; label: string }[] };
-export type ProviderDefinition = { id: string; name: string; category: Category; initials: string; color: string; description: string; helpUrl: string; fields: SettingField[] };
+export type ProviderDefinition = { id: string; name: string; category: Category; initials: string; color: string; description: string; showInUsage: boolean; helpUrl: string; fields: SettingField[] };
 export type AccountRouting = { enabled: boolean };
 export type PoolMember = { accountId: string; model: string };
 export type RouteMode = "failover" | "loadDistribution";

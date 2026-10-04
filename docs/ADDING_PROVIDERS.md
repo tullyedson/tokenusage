@@ -11,6 +11,8 @@ The extension boundary is `IUsageProvider` in `src-tauri/src/providers/mod.rs`. 
 
 That is enough to make the provider appear in both Settings and Usage. Choose an existing category: `llm`, `music`, `speech` or `media`. IDs must be unique, stable lowercase letters, digits or hyphens because they are also used as session-profile identifiers.
 
+Set `ProviderDefinition.show_in_usage` to `true` for providers with allowances or credits. Set it to `false` for routing-only local servers. Usage uses this metadata for its account cards, counts and setup shortcuts; Settings and Models still include local connections. Unconfigured usage providers appear as setup buttons that open the provider's account form directly. Keep this policy in provider metadata rather than adding provider-ID checks to the frontend.
+
 The ID `router` is reserved for local client authentication. Do not use it as a provider ID.
 
 ## Contract
@@ -48,6 +50,8 @@ Test through `IInferenceProvider` with fictional local HTTP fixtures. Cover name
 The OpenRouter and OpenCode adapters demonstrate native-key connections. Return `Ready` from `connect`, load the key in `fetch`, and call `http::get_usage` with a verified constant HTTPS endpoint and the cancellation flag. This transport permits GET only, rejects redirects, uses bounded waits and response sizes, and returns redacted errors. Parse only quota fields into a `UsageSnapshot`. Avoid logging raw responses, keys or account identity. Use a helpful static 403 message when the source requires a specific key type or subscription.
 
 The OpenAI adapter demonstrates an optional local-process transport without special cases in the service or dashboard. It launches a hidden, bounded subprocess, issues only the usage request, and terminates the subprocess on completion, failure or cancellation.
+
+The Google adapter separates Gemini app and Antigravity allowances through connection metadata. Gemini's website uses a read-only `GetUsageInfo` RPC carried over a POST, with its session token kept inside the isolated page. Antigravity's desktop protocol also uses a read-only POST; its discovery helper inspects only installed same-user language-server processes and their owned loopback sockets. Its private client accepts the service's local self-signed certificate, with no proxy, redirects, configurable host, or remote reuse. The native cloud GET-only transport is unchanged. Never infer one Google product's quota from another product or from a plan name; preserve every reported group/window and its reset independently.
 
 ## Meter semantics
 

@@ -2,7 +2,7 @@
 
 A Rust and Tauri 2 app for Windows that shows AI account usage in the system tray and provides an optional local model router.
 
-**Version 0.8.0** adds per-call body sizes, provider token counts, context usage and supported account allowance observations to Reports. It includes long chat histories, sticky load distribution and ordered failover. Each pool has its own route type. Provider context/input/output limits pass through the router and into OpenCode. Each model pool advertises the lowest supported limits across its enabled entries. The Models page shows these limits; Reports shows active destinations and recent fallback history. Create common names such as `flash-models` on Models, drag in models from different providers or local servers, and choose how to route them. Calling apps use that one name while the router follows the pool's selection policy. Plan-only routing is the default for supported accounts.
+**Version 0.9.1** makes unconfigured providers easy to connect directly from Usage and keeps local model servers in Settings and Models. Google AI Ultra has separate Gemini app and Antigravity usage connections. It includes per-call body sizes, provider token counts, context usage and supported account allowance observations in Reports, plus sticky load distribution and ordered failover. Each pool has its own route type. Provider context/input/output limits pass through the router and into OpenCode. Each model pool advertises the lowest supported limits across its enabled entries. The Models page shows these limits; Reports shows active destinations and recent fallback history. Create common names such as `flash-models` on Models, drag in models from different providers or local servers, and choose how to route them. Calling apps use that one name while the router follows the pool's selection policy. Plan-only routing is the default for supported accounts.
 
 | Page | What you can do |
 | --- | --- |
@@ -12,7 +12,7 @@ A Rust and Tauri 2 app for Windows that shows AI account usage in the system tra
 | **Reports** | Follow active pipelines and inspect recent routes, elapsed time, body sizes, tokens and usage percentages. |
 | **Routing** | Enable the local API and manage its port and client key. |
 
-**Routing supports OpenCode Go, eligible Ollama Cloud subscriptions, Ollama (local), vLLM (local or LAN), and verified OpenRouter free models.** Go and Ollama Cloud require the provider billing setup below to stop at included allowances. OpenAI/Codex, Anthropic, Suno and Higgsfield remain usage-monitoring connections only. A subscription usage bar alone does not enable inference. There is no paid fallback option in the app. Provider-side overages must also be disabled as described below.
+**Routing supports OpenCode Go, eligible Ollama Cloud subscriptions, Ollama (local), vLLM (local or LAN), and verified OpenRouter free models.** Go and Ollama Cloud require the provider billing setup below to stop at included allowances. OpenAI/Codex, Anthropic, Google AI Ultra, Suno and Higgsfield remain usage-monitoring connections only. A subscription usage bar alone does not enable inference. There is no paid fallback option in the app. Provider-side overages must also be disabled as described below.
 
 [Install](#install-and-open) · [Connect accounts](#connect-accounts-and-see-usage) · [Set up routing](#set-up-routing) · [Calling-app example](#connect-a-calling-app) · [Troubleshooting](#troubleshooting) · [Build from source](#build-from-source)
 
@@ -22,12 +22,14 @@ This README describes the checked-out source version. `main` changes only after 
 
 Use Windows x64 and Microsoft Edge WebView2. You do not need Rust or Node.js to run an installer supplied by the maintainer; those are only needed to build the app.
 
-1. Run the **AI Usage 0.8.0 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
+1. Run the **AI Usage 0.9.1 x64 NSIS installer**. It installs for the current Windows user and installs WebView2 if it is missing. Generated installers are outside Git; if you have source only, follow [Build from source](#build-from-source).
 2. Launch **AI Usage** from the Start menu. If you cannot see its tray icon, open Windows' hidden-icons area.
 3. Click or double-click the tray icon to open **Usage**. Right-click it for **Show usage**, **Settings**, or **Exit**.
 4. Use the **Usage**, **Models**, **Reports**, **Routing** and **Settings** tabs in the app window. Closing this window hides it; **Exit** stops the app and its router.
 
 To upgrade, finish active routed requests, choose **Exit**, run the newer installer, then reopen AI Usage. Existing settings and account connections are preserved. In **Settings**, enable **Start with Windows** if you want the app to start with its window hidden. The router also starts when the app starts if you have enabled and saved it.
+
+If **App Launcher** manages AI Usage, use its **Stop** action before installing and **Start** afterward. The app's own Exit can trigger the launcher's automatic restart. Keep Windows startup ownership in the launcher to avoid duplicate launches.
 
 ## Connect accounts and see usage
 
@@ -45,6 +47,7 @@ Use **Add another account** inside a provider for another connection. Each accou
 | --- | --- | --- | --- |
 | OpenAI | LLM | **Sign in to ChatGPT**, or **Use signed-in Codex** if the installed Codex app/CLI is already signed in. Leave **Codex executable** blank for automatic discovery. **ChatGPT account ID** is optional for a specific website workspace. | Codex subscription windows and any additional credit balance. Other ChatGPT chat-model caps are not exposed by this source. |
 | Anthropic | LLM | Sign in to Claude. Leave **Organization ID** blank for automatic selection; specify the subscribed organization if the reader reports several choices. | Five-hour and weekly usage, available model-specific windows and enabled extra-usage spending allowance. |
+| Google AI Ultra | LLM | Choose **Gemini app (Google sign-in)**, or **Antigravity (signed-in desktop app)**. Use **Add another account** for a separate product connection and give each a clear label. | Gemini app five-hour and weekly allowances, plus any separately reported AI credit balance; or Antigravity's individual model-group allowance windows and reset times. |
 | Ollama Cloud | LLM | Sign in for usage. Routing additionally needs an **Ollama API key** for that account and a plan that stops at its limits without extra credits. | Monthly included-credit spending and any session, hourly or weekly percentages shown in settings, with each window's reported reset date and local time. |
 | OpenRouter | LLM | Choose **Account credits (management key)** or **This key's allowance (standard key)**, then enter the matching **OpenRouter key**. | Account USD balance, or the selected key's remaining spending allowance. |
 | OpenCode | LLM | Enter an **OpenCode API key** from the workspace/member with an active Go subscription. | Go five-hour, weekly and monthly percentages and reset times. |
@@ -58,6 +61,8 @@ OpenAI's source reports **Codex usage**. The separate **GPT-5.3-Codex-Spark** fi
 For **OpenRouter**, choose **Account credits (management key)** to see the account balance. Obtain a management key in your OpenRouter account settings. The percentage compares the remaining balance with the provider's total purchased credits, not a recurring monthly budget. **This key's allowance (standard key)** uses the key's own configured daily, weekly, monthly or lifetime spending cap. An uncapped key has no remaining allowance to calculate; this does not mean its account has unlimited credits. Management-key connections make only read-only usage requests.
 
 For **OpenCode**, use an API key from the workspace and member with an active **Go** subscription. The three meters use OpenCode's reported consumption and reset timestamps, without hardcoded dollar limits. **Zen pay-as-you-go wallet credits and usage of other providers through the OpenCode CLI are not included** in this connection. Track other providers with their respective adapters.
+
+For **Google AI Ultra**, click its button under **Connect a provider** on Usage, or open **Settings > LLM > Google AI Ultra**. Connect each supported product separately. Choose a **Usage source**, label it (for example, `Google - Gemini`), enable it, and click **Connect account**. Use **Add another account** for `Google - Antigravity`. Gemini sign-in uses this app's isolated browser and reads the account's actual Usage page data. Its reader has fixture coverage; a real Google sign-in in WebView2 has not yet been verified. Antigravity requires the signed-in Windows desktop app to be running in its standard installation location. Its connection follows that app's current account, so creating several Antigravity connections does not create independent Google sign-ins. Antigravity has been verified against the signed-in desktop service. The tracker reads quotas only and does not enable overages or routing. Gemini and Antigravity have separate allowances; any reported AI credit balance is also separate from included usage. No limit is inferred from the Ultra plan name. Flow is not tracked.
 
 Balances without a reported denominator display **Percent unavailable**. Suno and Higgsfield offer an optional reference allowance for their total-credit bars; it is your comparison value, not a provider-reported limit. Separate subscription bars use the provider's reported allowance. Reset times are displayed only when supplied; reaching a reset time never invents a new balance.
 
@@ -83,7 +88,7 @@ Go checks all three allowance windows before every request. An exhausted window 
 
 **Plan only is the app's default policy, with no paid fallback switch.** These provider APIs do not expose a verified per-request no-overage switch or a way to inspect their external billing settings. Keep paid overages, extra credits and automatic top-ups disabled at the provider. Disable an account's pool toggle before changing those conditions. The app does not change your provider billing settings. Credentials remain in Windows Credential Manager, and model discovery/quota reads do not generate text.
 
-Catalog names are discovered through each provider adapter. A selected model must support Chat Completions and the requested tools/options. A Responses-only or Messages-only model requires a separate protocol adapter. OpenAI/Codex, Anthropic, Suno and Higgsfield still support usage monitoring only.
+Catalog names are discovered through each provider adapter. A selected model must support Chat Completions and the requested tools/options. A Responses-only or Messages-only model requires a separate protocol adapter. OpenAI/Codex, Anthropic, Google AI Ultra, Suno and Higgsfield still support usage monitoring only.
 
 **Ollama on this PC**
 
@@ -354,7 +359,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build.ps1
 
 The build script prepares a local test-temp directory, runs frontend tests, Rust tests and Clippy, then builds the production frontend and NSIS installer. The default outputs for this version are:
 
-- `src-tauri/target/release/bundle/nsis/AI Usage_0.8.0_x64-setup.exe`, the installer to distribute.
+- `src-tauri/target/release/bundle/nsis/AI Usage_0.9.1_x64-setup.exe`, the installer to distribute.
 - `src-tauri/target/release/ai-usage-tray.exe`, the app executable you can run directly.
 
 If `CARGO_TARGET_DIR` is set, the native outputs are under that directory instead. Build outputs, dependencies and account data are ignored by Git. Building the installer does not run it.

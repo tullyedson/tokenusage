@@ -20,7 +20,7 @@ impl IUsageProvider for OpenAi {
                 label: "Use signed-in Codex",
             },
         ];
-        ProviderDefinition { id: "openai", name: "OpenAI", category: "llm", initials: "OA", color: "#87e4b0", description: "Codex allowances included with your ChatGPT subscription. Other ChatGPT model caps are not exposed by this usage source.", help_url: "https://chatgpt.com/codex/settings/usage", fields: vec![connection, SettingField::text("executable", "Codex executable", "Only for the Codex connection. Leave blank to find the installed Codex app or CLI automatically."), SettingField::text("account_id", "ChatGPT account ID", "Optional, for selecting a specific workspace with the website connection.")] }
+        ProviderDefinition { id: "openai", name: "OpenAI", category: "llm", initials: "OA", color: "#87e4b0", description: "Codex allowances included with your ChatGPT subscription. Other ChatGPT model caps are not exposed by this usage source.", show_in_usage: true, help_url: "https://chatgpt.com/codex/settings/usage", fields: vec![connection, SettingField::text("executable", "Codex executable", "Only for the Codex connection. Leave blank to find the installed Codex app or CLI automatically."), SettingField::text("account_id", "ChatGPT account ID", "Optional, for selecting a specific workspace with the website connection.")] }
     }
     fn browser_spec(&self) -> Option<BrowserSpec> {
         Some(BrowserSpec {

@@ -79,6 +79,7 @@ mod tests {
             initials: "T",
             color: "#fff",
             description: "",
+            show_in_usage: true,
             help_url: "",
             fields: vec![
                 SettingField::secret("api_key", "API key", ""),

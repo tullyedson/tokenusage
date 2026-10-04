@@ -1,15 +1,17 @@
 // Development-only fixture adapter. Vite removes this module from release builds.
-import type { CallMetrics, AccountRouting, ModelPool, ModelLibrary, Bootstrap, IUsageAppApi, Page, ProviderDefinition, ProviderReport, RouterSettings, RoutingReport, Unsubscribe, UsageMeter } from "./types";
+import type { CallMetrics, AccountRouting, ModelPool, ModelLibrary, Bootstrap, IUsageAppApi, Page, ProviderDefinition, ProviderReport, RouterSettings, RoutingReport, Unsubscribe, UsageMeter, UsageSnapshot } from "./types";
 
 const providers: ProviderDefinition[] = [
-  { id: "openai", name: "OpenAI", category: "llm", initials: "OA", color: "#87e4b0", description: "Codex allowances included with your ChatGPT subscription.", helpUrl: "https://chatgpt.com/codex/settings/usage", fields: [{ key: "connection", label: "Connection", kind: "select", help: "Use a separate website session or the existing Codex sign-in.", placeholder: "", options: [{ value: "browser", label: "Sign in to ChatGPT" }, { value: "codex", label: "Use signed-in Codex" }] }] },
-  { id: "anthropic", name: "Anthropic", category: "llm", initials: "An", color: "#dba185", description: "Claude subscription allowances.", helpUrl: "https://claude.ai/settings/usage", fields: [] },
-  { id: "ollama", name: "Ollama Cloud", category: "llm", initials: "Ol", color: "#d2d8e0", description: "Cloud usage from Ollama settings.", helpUrl: "https://ollama.com/settings", fields: [] },
-  { id: "suno", name: "Suno", category: "music", initials: "Su", color: "#edb276", description: "Your monthly and total credits.", helpUrl: "https://suno.com/account", fields: [{ key: "allowance", label: "Total-credit reference allowance", kind: "number", help: "Only used if the provider has no total allowance.", placeholder: "Optional", options: [] }] },
-  { id: "higgsfield", name: "Higgsfield", category: "media", initials: "Hi", color: "#b8a3ef", description: "Your subscription wallet.", helpUrl: "https://higgsfield.ai/me/settings/subscription", fields: [] },
-  { id: "openrouter", name: "OpenRouter", category: "llm", initials: "OR", color: "#afa8f4", description: "Account credits or a single key's allowance.", helpUrl: "https://openrouter.ai/settings/keys", fields: [{ key: "connection", label: "Usage source", kind: "select", help: "Account credits require a management key.", placeholder: "", options: [{ value: "credits", label: "Account credits (management key)" }, { value: "key", label: "This key's allowance (standard key)" }] }, { key: "api_key", label: "OpenRouter key", kind: "secret", help: "Saved in Windows Credential Manager in the desktop app.", placeholder: "Paste a key", options: [] }] },
-  { id: "opencode", name: "OpenCode", category: "llm", initials: "OC", color: "#e0dcd3", description: "OpenCode Go subscription allowances.", helpUrl: "https://opencode.ai/auth", fields: [{ key: "api_key", label: "OpenCode API key", kind: "secret", help: "Use a key from the workspace with your Go subscription.", placeholder: "Paste a key", options: [] }] },
-  { id: "vllm-local", name: "vLLM (local)", category: "llm", initials: "vL", color: "#87b9cf", description: "Models on your own hardware.", helpUrl: "https://docs.vllm.ai", fields: [] },
+  { id: "openai", name: "OpenAI", category: "llm", initials: "OA", color: "#87e4b0", description: "Codex allowances included with your ChatGPT subscription.", showInUsage: true, helpUrl: "https://chatgpt.com/codex/settings/usage", fields: [{ key: "connection", label: "Connection", kind: "select", help: "Use a separate website session or the existing Codex sign-in.", placeholder: "", options: [{ value: "browser", label: "Sign in to ChatGPT" }, { value: "codex", label: "Use signed-in Codex" }] }] },
+  { id: "anthropic", name: "Anthropic", category: "llm", initials: "An", color: "#dba185", description: "Claude subscription allowances.", showInUsage: true, helpUrl: "https://claude.ai/settings/usage", fields: [] },
+  { id: "google", name: "Google AI Ultra", category: "llm", initials: "G", color: "#8ab4f8", description: "Google AI subscription allowances, reported separately for each product. Usage monitoring only.", showInUsage: true, helpUrl: "https://support.google.com/googleone/answer/16286513", fields: [{ key: "connection", label: "Usage source", kind: "select", help: "Add a connection for each Google product. Antigravity follows its desktop app sign-in.", placeholder: "", options: [{value:"gemini",label:"Gemini app (Google sign-in)"},{value:"antigravity",label:"Antigravity (signed-in desktop app)"}] }] },
+  { id: "ollama", name: "Ollama Cloud", category: "llm", initials: "Ol", color: "#d2d8e0", description: "Cloud usage from Ollama settings.", showInUsage: true, helpUrl: "https://ollama.com/settings", fields: [] },
+  { id: "suno", name: "Suno", category: "music", initials: "Su", color: "#edb276", description: "Your monthly and total credits.", showInUsage: true, helpUrl: "https://suno.com/account", fields: [{ key: "allowance", label: "Total-credit reference allowance", kind: "number", help: "Only used if the provider has no total allowance.", placeholder: "Optional", options: [] }] },
+  { id: "higgsfield", name: "Higgsfield", category: "media", initials: "Hi", color: "#b8a3ef", description: "Your subscription wallet.", showInUsage: true, helpUrl: "https://higgsfield.ai/me/settings/subscription", fields: [] },
+  { id: "openrouter", name: "OpenRouter", category: "llm", initials: "OR", color: "#afa8f4", description: "Account credits or a single key's allowance.", showInUsage: true, helpUrl: "https://openrouter.ai/settings/keys", fields: [{ key: "connection", label: "Usage source", kind: "select", help: "Account credits require a management key.", placeholder: "", options: [{ value: "credits", label: "Account credits (management key)" }, { value: "key", label: "This key's allowance (standard key)" }] }, { key: "api_key", label: "OpenRouter key", kind: "secret", help: "Saved in Windows Credential Manager in the desktop app.", placeholder: "Paste a key", options: [] }] },
+  { id: "opencode", name: "OpenCode", category: "llm", initials: "OC", color: "#e0dcd3", description: "OpenCode Go subscription allowances.", showInUsage: true, helpUrl: "https://opencode.ai/auth", fields: [{ key: "api_key", label: "OpenCode API key", kind: "secret", help: "Use a key from the workspace with your Go subscription.", placeholder: "Paste a key", options: [] }] },
+  { id: "vllm-local", name: "vLLM (local)", category: "llm", initials: "vL", color: "#87b9cf", description: "Models on your own hardware.", showInUsage: false, helpUrl: "https://docs.vllm.ai", fields: [] },
+  { id: "ollama-local", name: "Ollama (local)", category: "llm", initials: "Ol", color: "#82bbec", description: "Models on your own hardware.", showInUsage: false, helpUrl: "https://docs.ollama.com", fields: [] },
 ];
 
 function sample(label: string, percentLeft: number, hours: number, remaining: number | null = null, limit: number | null = null, unit = "%"): UsageMeter {
@@ -17,20 +19,23 @@ function sample(label: string, percentLeft: number, hours: number, remaining: nu
 }
 function fixture(): Bootstrap {
   const empty = new URLSearchParams(location.search).has("empty");
+  const setup = new URLSearchParams(location.search).has("setup");
   const pools: ModelPool[] = new URLSearchParams(location.search).has("pool") ? [{ name: "flash-models", mode: new URLSearchParams(location.search).has("distribution") ? "loadDistribution" : "failover", members: [{ accountId: "opencode", model: "glm-5.3-flash" }, { accountId: "ollama", model: "deepseek-flash" }, { accountId: "ollama", model: "qwen3-coder" }] }] : [];
-  const reports: ProviderReport[] = providers.map((provider, index) => ({
+  const samples: Record<string, Pick<UsageSnapshot, "plan" | "meters">> = {
+    openai: { plan: "Pro", meters: [sample("5-hour allowance", 74, 3), sample("Weekly allowance", 42, 58)] },
+    anthropic: { plan: "Max", meters: [sample("5-hour allowance", 91, 4), sample("Weekly allowance", 18, 94)] },
+    google: { plan: "Google AI Ultra", meters: [sample("Gemini app - 5-hour allowance", 75, 2), sample("Gemini app - weekly allowance", 42, 70)] },
+    ollama: { plan: "Pro", meters: [sample("Monthly usage", 62, 270, 62, 100, "USD")] },
+    suno: { plan: "Pro", meters: [sample("Monthly credits", 68, 155, 1700, 2500, "credits")] },
+    higgsfield: { plan: "Ultimate", meters: [sample("Subscription credits", 36, 188, 1080, 3000, "credits")] },
+    openrouter: { plan: "Account credits", meters: [{ ...sample("Account credits", 75, 0, 75, 100, "USD"), resetsAt: null }] },
+    opencode: { plan: "Go subscription", meters: [sample("5-hour allowance", 75, 3), sample("Weekly allowance", 50, 62), sample("Monthly allowance", 40, 182)] },
+  };
+  const reports: ProviderReport[] = providers.map(provider => ({
     providerId: provider.id, updatedAt: Math.floor(Date.now() / 1000) - 30, attemptedAt: Math.floor(Date.now() / 1000) - 30, refreshing: false, error: null,
-    snapshot: { plan: ["Pro", "Max", "Pro", "Pro", "Ultimate", "Account credits", "Go subscription"][index] ?? null, note: null, meters: [
-      [sample("5-hour allowance", 74, 3), sample("Weekly allowance", 42, 58)],
-      [sample("5-hour allowance", 91, 4), sample("Weekly allowance", 18, 94)],
-      [sample("Monthly usage", 62, 270, 62, 100, "USD")],
-      [sample("Monthly credits", 68, 155, 1700, 2500, "credits")],
-      [sample("Subscription credits", 36, 188, 1080, 3000, "credits")],
-      [{ ...sample("Account credits", 75, 0, 75, 100, "USD"), resetsAt: null }],
-      [sample("5-hour allowance", 75, 3), sample("Weekly allowance", 50, 62), sample("Monthly allowance", 40, 182)],
-    ][index] ?? [] },
+    snapshot: { ...(samples[provider.id] ?? { plan: null, meters: [] }), note: null },
   }));
-  return { providers, settings: { version: 3, refreshMinutes: 5, routing: { enabled: false, port: 43129, pools }, providers: empty ? {} : Object.fromEntries(providers.map(provider => [provider.id, { providerType: "", label: "", routing: { enabled: true }, enabled: true, fields: {}, sessionGeneration: 0, revision: 0 }])) }, reports: empty ? [] : reports, startupError: null, configuredSecrets: {}, inference: { opencode: { description: "OpenCode Go plan allowances." }, ollama: { description: "Ollama Cloud plan allowances." }, openrouter: { description: "Free models only." } }, router: { running: false, baseUrl: "http://127.0.0.1:43129/v1", tokenConfigured: false, error: null } };
+  return { providers, settings: { version: 3, refreshMinutes: 5, routing: { enabled: false, port: 43129, pools }, providers: empty ? {} : Object.fromEntries(providers.filter(provider => !setup || provider.id !== "google").map(provider => [provider.id, { providerType: "", label: "", routing: { enabled: true }, enabled: true, fields: {}, sessionGeneration: 0, revision: 0 }])) }, reports: empty ? [] : reports.filter(report => !setup || report.providerId !== "google"), startupError: null, configuredSecrets: {}, inference: { opencode: { description: "OpenCode Go plan allowances." }, ollama: { description: "Ollama Cloud plan allowances." }, openrouter: { description: "Free models only." }, "vllm-local": { description: "Local inference" }, "ollama-local": { description: "Local inference" } }, router: { running: false, baseUrl: "http://127.0.0.1:43129/v1", tokenConfigured: false, error: null } };
 }
 function sampleMetrics(overrides: Partial<CallMetrics> = {}): CallMetrics {
   return { requestBytes: 183420, responseBytes: 14280, tokens: { input: 42000, output: 720, total: 42720, cachedInput: 32000, reasoning: null }, contextLimit: 1000000, contextUsedPercent: 4.272, allowance: null, ...overrides };

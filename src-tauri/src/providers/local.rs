@@ -33,7 +33,7 @@ impl IUsageProvider for LocalModels {
             "Use localhost, a private LAN IP or a .local hostname. The server must already be running.",
         );
         base.placeholder = url;
-        ProviderDefinition { id, name, category: "llm", initials, color: "#82bbec", description: "Models running on your own hardware. There is no subscription quota. Create model pools on Models after connecting.", help_url: help, fields: vec![base, SettingField::secret("api_key", "Server API key", "Optional for local Ollama. Use your vLLM server key if authentication is enabled.")] }
+        ProviderDefinition { id, name, category: "llm", initials, color: "#82bbec", description: "Models running on your own hardware. There is no subscription quota. Create model pools on Models after connecting.", show_in_usage: false, help_url: help, fields: vec![base, SettingField::secret("api_key", "Server API key", "Optional for local Ollama. Use your vLLM server key if authentication is enabled.")] }
     }
     fn inference(&self) -> Option<Arc<dyn IInferenceProvider>> {
         Some(Arc::new(self.0))

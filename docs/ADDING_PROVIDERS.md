@@ -49,6 +49,8 @@ The OpenRouter and OpenCode adapters demonstrate native-key connections. Return 
 
 The OpenAI adapter demonstrates an optional local-process transport without special cases in the service or dashboard. It launches a hidden, bounded subprocess, issues only the usage request, and terminates the subprocess on completion, failure or cancellation.
 
+The Google adapter separates Gemini app and Antigravity allowances through connection metadata. Gemini's website uses a read-only `GetUsageInfo` RPC carried over a POST, with its session token kept inside the isolated page. Antigravity's desktop protocol also uses a read-only POST; its discovery helper inspects only installed same-user language-server processes and their owned loopback sockets. Its private client accepts the service's local self-signed certificate, with no proxy, redirects, configurable host, or remote reuse. The native cloud GET-only transport is unchanged. Never infer one Google product's quota from another product or from a plan name; preserve every reported group/window and its reset independently.
+
 ## Meter semantics
 
 Use `UsageMeter::used_percent(label, used, reset)` when the source reports percent consumed. The helper calculates percent remaining and clamps an exhausted allowance to zero. Use `UsageMeter::balance(label, remaining, limit, unit, reset)` for credits, money or tokens. Pass `None` when the limit is unknown. Never fabricate a denominator from a plan name or merge unrelated windows. Purchased top-ups may make a total balance larger than the recurring allowance.

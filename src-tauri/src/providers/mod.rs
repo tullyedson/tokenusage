@@ -1,6 +1,8 @@
 //! To add a provider: implement IUsageProvider in one module and register it below.
 //! The UI builds settings and usage cards entirely from this public contract.
 mod anthropic;
+mod google;
+mod google_antigravity;
 mod higgsfield;
 mod local;
 mod ollama;
@@ -86,6 +88,7 @@ pub fn registry() -> Vec<Arc<dyn IUsageProvider>> {
     vec![
         Arc::new(openai::OpenAi),
         Arc::new(anthropic::Anthropic),
+        Arc::new(google::Google),
         Arc::new(ollama::Ollama),
         Arc::new(openrouter::OpenRouter),
         Arc::new(opencode::OpenCode),
